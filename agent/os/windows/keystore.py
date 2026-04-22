@@ -38,7 +38,12 @@ _CRYPTPROTECT_LOCAL_MACHINE = 0x4   # any account on this machine can decrypt
 # ── Public API ────────────────────────────────────────────────────────────────
 
 def store_key(agent_id: str, key_hex: str,
-              security_dir: str = r"C:\Program Files (x86)\Jarvis\security") -> None:
+              security_dir: str = "") -> None:
+    if not security_dir:
+        import os as _os
+        security_dir = _os.path.join(
+            _os.environ.get("PROGRAMDATA", r"C:\ProgramData"), "Jarvis", "security"
+        )
     """Persist API key with DPAPI. Falls back to ACL-restricted file."""
     # Try Credential Manager first
     if _cm_store(agent_id, key_hex):
@@ -54,7 +59,12 @@ def store_key(agent_id: str, key_hex: str,
 
 
 def load_key(agent_id: str,
-             security_dir: str = r"C:\Program Files (x86)\Jarvis\security") -> str | None:
+             security_dir: str = "") -> str | None:
+    if not security_dir:
+        import os as _os
+        security_dir = _os.path.join(
+            _os.environ.get("PROGRAMDATA", r"C:\ProgramData"), "Jarvis", "security"
+        )
     """Load API key. Returns None if no key found."""
     # Credential Manager
     key = _cm_load(agent_id)
@@ -69,7 +79,12 @@ def load_key(agent_id: str,
 
 
 def delete_key(agent_id: str,
-               security_dir: str = r"C:\Program Files (x86)\Jarvis\security") -> None:
+               security_dir: str = "") -> None:
+    if not security_dir:
+        import os as _os
+        security_dir = _os.path.join(
+            _os.environ.get("PROGRAMDATA", r"C:\ProgramData"), "Jarvis", "security"
+        )
     """Remove stored key (re-enrollment / uninstall)."""
     _cm_delete(agent_id)
     for path in [
@@ -85,7 +100,7 @@ def delete_key(agent_id: str,
 
 # ── Windows Credential Manager ────────────────────────────────────────────────
 
-_CM_SERVICE = "com.macintel.agent"
+_CM_SERVICE = "com.jarvis.agent"
 
 
 def _cm_store(agent_id: str, key_hex: str) -> bool:

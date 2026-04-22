@@ -1,0 +1,29 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pip install *)",
+      "Bash(graphify install *)",
+      "Bash(python -c ' *)",
+      "Bash(pip show *)",
+      "Bash(dotnet tool *)",
+      "Bash(dotnet --version)",
+      "Bash(python *)",
+      "Bash(winget --version)",
+      "Bash(winget install *)",
+      "Bash(where.exe python3.11)",
+      "Bash(where.exe python *)",
+      "Read(//c/Program Files/**)",
+      "Read(//c/Users/WZ/AppData/Local/Programs/Python/Python311/**)",
+      "Bash(export PATH=\"$PYTHON311:$PYTHON311/Scripts:$DOTNET:$PATH\")",
+      "Bash(/c/Users/WZ/AppData/Local/Programs/Python/Python311/python.exe --version)",
+      "Bash(\"/c/Program Files/dotnet/dotnet.exe\" --version)",
+      "Bash(/c/Users/WZ/AppData/Local/Programs/Python/Python311/python.exe -m pip install --upgrade pip --quiet)",
+      "Bash(/c/Users/WZ/AppData/Local/Programs/Python/Python311/python.exe -m pip install pyinstaller pywin32 cryptography requests urllib3 keyring psutil)",
+      "Bash($PY $POSTINSTALL *)",
+      "Bash($DOTNET tool *)",
+      "Bash('/c/Program Files/dotnet/dotnet.exe' tool uninstall --global wix)",
+      "Bash('/c/Program Files/dotnet/dotnet.exe' tool install --global wix --version 4.0.5)",
+      "Bash($PY *)"
+    ]
+  }
+}

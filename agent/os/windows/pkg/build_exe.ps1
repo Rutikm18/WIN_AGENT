@@ -1,11 +1,11 @@
 <#
 .SYNOPSIS
-    Build mac_intel Agent Windows binaries via PyInstaller.
+    Build Jarvis Agent Windows binaries via PyInstaller.
 
 .DESCRIPTION
     Produces two standalone .exe files:
-      dist\macintel-agent.exe    — main agent (runs as Windows Service or CLI)
-      dist\macintel-watchdog.exe — watchdog (runs as Windows Service)
+      dist\jarvis-agent.exe    - main agent (runs as Windows Service or CLI)
+      dist\jarvis-watchdog.exe - watchdog (runs as Windows Service)
 
     Optionally signs them with a code-signing certificate.
     Output directory: agent\os\windows\pkg\dist\
@@ -41,6 +41,8 @@ $AgentOsDir = Split-Path $WindowsDir -Parent
 $AgentDir   = Split-Path $AgentOsDir -Parent
 $Root       = Split-Path $AgentDir -Parent
 $DistDir    = "$ScriptDir\dist"
+$AgentExe   = "$DistDir\jarvis-agent.exe"
+$WdExe      = "$DistDir\jarvis-watchdog.exe"
 
 Write-Host ""
 Write-Host "  mac_intel Windows Binary Builder" -ForegroundColor Cyan
@@ -73,13 +75,13 @@ VSVersionInfo(
   kids=[
     StringFileInfo([
       StringTable(u'040904B0', [
-        StringStruct(u'CompanyName',      u'mac_intel'),
-        StringStruct(u'FileDescription',  u'mac_intel Endpoint Agent'),
+        StringStruct(u'CompanyName',      u'Jarvis'),
+        StringStruct(u'FileDescription',  u'Jarvis Endpoint Agent'),
         StringStruct(u'FileVersion',      u'$Version'),
-        StringStruct(u'InternalName',     u'macintel-agent'),
-        StringStruct(u'LegalCopyright',   u'Copyright 2026 mac_intel'),
-        StringStruct(u'OriginalFilename', u'macintel-agent.exe'),
-        StringStruct(u'ProductName',      u'mac_intel Agent'),
+        StringStruct(u'InternalName',     u'jarvis-agent'),
+        StringStruct(u'LegalCopyright',   u'Copyright 2026 Jarvis'),
+        StringStruct(u'OriginalFilename', u'jarvis-agent.exe'),
+        StringStruct(u'ProductName',      u'Jarvis Agent'),
         StringStruct(u'ProductVersion',   u'$Version'),
       ])
     ]),
@@ -89,13 +91,13 @@ VSVersionInfo(
 "@ | Out-File -FilePath $VersionFile -Encoding utf8
 
 # ── Build agent EXE ───────────────────────────────────────────────────────────
-Write-Host "  Building macintel-agent.exe..." -NoNewline
+Write-Host "  Building jarvis-agent.exe..." -NoNewline
 Push-Location $Root
 
 pyinstaller `
     --onefile `
     --clean `
-    --name macintel-agent `
+    --name jarvis-agent `
     --distpath "$DistDir" `
     --workpath "$ScriptDir\build\agent" `
     --specpath "$ScriptDir" `
@@ -106,27 +108,31 @@ pyinstaller `
     --hidden-import agent.agent.enrollment `
     --hidden-import agent.agent.keystore `
     --hidden-import agent.agent.normalizer `
-    --hidden-import agent.os.windows.collectors `
-    --hidden-import agent.os.windows.normalizer `
-    --hidden-import agent.os.windows.keystore `
     --hidden-import agent.agent.circuit_breaker `
+    --hidden-import agent.os.windows.win_agent `
+    --hidden-import agent.os.windows.tls_transport `
+    --hidden-import agent.os.windows.service `
+    --hidden-import agent.os.windows.keystore `
+    --hidden-import agent.os.windows.normalizer `
     --hidden-import agent.os.windows.collectors `
     --hidden-import agent.os.windows.collectors.volatile `
     --hidden-import agent.os.windows.collectors.network `
     --hidden-import agent.os.windows.collectors.system `
     --hidden-import agent.os.windows.collectors.posture `
     --hidden-import agent.os.windows.collectors.inventory `
-    --hidden-import agent.os.windows.normalizer `
-    --hidden-import agent.os.windows.keystore `
-    --hidden-import agent.os.windows.service `
+    --hidden-import agent.os.windows.collectors.eventlog `
     --hidden-import win32service `
     --hidden-import win32serviceutil `
     --hidden-import win32event `
+    --hidden-import win32evtlog `
     --hidden-import servicemanager `
     --hidden-import win32crypt `
+    --hidden-import pywintypes `
     --hidden-import psutil `
     --hidden-import cryptography `
     --hidden-import cryptography.hazmat.primitives.ciphers.aead `
+    --hidden-import requests `
+    --hidden-import urllib3 `
     agent\os\windows\agent_win_entry.py
 
 if ($LASTEXITCODE -ne 0) {
@@ -136,16 +142,16 @@ if ($LASTEXITCODE -ne 0) {
 Write-Host " done" -ForegroundColor Green
 
 # ── Build watchdog EXE ────────────────────────────────────────────────────────
-Write-Host "  Building macintel-watchdog.exe..." -NoNewline
+Write-Host "  Building jarvis-watchdog.exe..." -NoNewline
 
 $WdVersionFile = "$ScriptDir\version_info_wd.txt"
-(Get-Content $VersionFile) -replace 'macintel-agent', 'macintel-watchdog' `
+(Get-Content $VersionFile) -replace 'jarvis-agent', 'jarvis-watchdog' `
     -replace 'Endpoint Agent', 'Watchdog' | Out-File $WdVersionFile -Encoding utf8
 
 pyinstaller `
     --onefile `
     --clean `
-    --name macintel-watchdog `
+    --name jarvis-watchdog `
     --distpath "$DistDir" `
     --workpath "$ScriptDir\build\watchdog" `
     --specpath "$ScriptDir" `
@@ -172,9 +178,9 @@ if ($SignIdentity) {
         Select-Object -First 1 -ExpandProperty FullName
 
     if (-not $signtool) {
-        Write-Warning "signtool.exe not found — skipping signing"
+        Write-Warning "signtool.exe not found - skipping signing"
     } else {
-        foreach ($exe in @("macintel-agent.exe", "macintel-watchdog.exe")) {
+        foreach ($exe in @("jarvis-agent.exe", "jarvis-watchdog.exe")) {
             $exePath = "$DistDir\$exe"
             Write-Host "  Signing $exe..." -NoNewline
             & $signtool sign /sha1 $SignIdentity /fd sha256 /tr http://timestamp.digicert.com /td sha256 $exePath
@@ -198,7 +204,7 @@ Write-Host "  Build complete!" -ForegroundColor Green
 Write-Host "  Output directory: $DistDir"
 Get-ChildItem $DistDir -Filter "*.exe" | ForEach-Object {
     $size = [math]::Round($_.Length / 1MB, 1)
-    Write-Host "    $($_.Name) — ${size} MB"
+    Write-Host "    $($_.Name) - ${size} MB"
 }
 Write-Host ""
 Write-Host "  To install (Run as Administrator):" -ForegroundColor Cyan

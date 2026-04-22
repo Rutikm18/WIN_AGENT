@@ -40,14 +40,14 @@ from __future__ import annotations
 
 import logging
 import os
-import queue
 import sys
 import threading
 
 log = logging.getLogger("agent.windows.service")
 
 # ── Config ────────────────────────────────────────────────────────────────────
-DEFAULT_CONFIG = r"C:\Program Files (x86)\Jarvis\config\agent.toml"
+_PROGRAMDATA  = os.environ.get("PROGRAMDATA", r"C:\ProgramData")
+DEFAULT_CONFIG = os.path.join(_PROGRAMDATA, "Jarvis", "config", "agent.toml")
 
 
 # ── pywin32 availability guard ────────────────────────────────────────────────
@@ -80,25 +80,18 @@ if _HAS_WIN32:
 
         def __init__(self, args):
             win32serviceutil.ServiceFramework.__init__(self, args)
-            self._stop_event    = win32event.CreateEvent(None, 0, 0, None)
-            self._agent_thread: threading.Thread | None = None
-            self._orch          = None
-            self._sender        = None
+            self._stop_event = win32event.CreateEvent(None, 0, 0, None)
+            self._win_agent  = None
 
         # ── SCM callbacks ─────────────────────────────────────────────────────
 
         def SvcStop(self):
             self.ReportServiceStatus(win32service.SERVICE_STOP_PENDING)
-            log.info("Service stop requested")
+            log.info("Service stop requested by SCM")
             win32event.SetEvent(self._stop_event)
-            if self._orch:
+            if self._win_agent:
                 try:
-                    self._orch.stop()
-                except Exception:
-                    pass
-            if self._sender:
-                try:
-                    self._sender.stop()
+                    self._win_agent.stop()
                 except Exception:
                     pass
 
@@ -125,43 +118,18 @@ if _HAS_WIN32:
                 log.critical(msg)
                 return
 
-            # Ensure project root is importable (PyInstaller already handles this,
-            # but also works when running from source)
             _add_root_to_path()
 
             try:
-                from agent.agent.core import load_config, setup_logging, _obtain_api_key
-                from agent.agent.core import Orchestrator
-                from agent.agent.crypto import derive_keys
-                from agent.agent.enrollment import EnrollmentError
-                from agent.agent.sender import Sender
+                from agent.os.windows.win_agent import WindowsAgent
 
-                cfg = load_config(config_path)
-                setup_logging(cfg)
+                self._win_agent = WindowsAgent.from_config(config_path)
+                log.info("Windows agent starting via SCM service wrapper")
 
-                try:
-                    api_key = _obtain_api_key(cfg, config_path)
-                except EnrollmentError as exc:
-                    servicemanager.LogErrorMsg(f"Enrollment failed: {exc}")
-                    log.critical("Enrollment failed: %s", exc)
-                    return
+                # run() blocks until the SCM stop event is set
+                self._win_agent.run(win32_stop_event=self._stop_event)
 
-                enc_key, mac_key = derive_keys(api_key)
-                send_q           = queue.Queue()
-
-                self._sender = Sender(cfg, send_q)
-                self._orch   = Orchestrator(cfg, enc_key, mac_key, send_q)
-
-                self._sender.start()
-                self._orch.start()
-
-                log.info("mac_intel Agent service running (agent_id=%s)",
-                         cfg["agent"]["id"])
-
-                # Block until SvcStop signals
-                win32event.WaitForSingleObject(self._stop_event,
-                                               win32event.INFINITE)
-                log.info("mac_intel Agent service stopping")
+                log.info("Windows agent exited cleanly")
 
             except Exception as exc:
                 servicemanager.LogErrorMsg(f"Agent service fatal error: {exc}")

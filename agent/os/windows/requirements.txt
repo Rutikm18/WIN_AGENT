@@ -14,3 +14,9 @@ keyring>=24.0.0
 # explicitly because the Windows collectors rely heavily on Windows-specific
 # psutil APIs (win_service_iter, num_handles, sensors_battery)
 psutil>=5.9.8
+
+# Hardened HTTPS transport used by win_agent.py (tls_transport.py)
+# requests is already a transitive dependency of many packages but listed
+# explicitly here because we depend on HTTPAdapter internals for SPKI pinning.
+requests>=2.31.0
+urllib3>=2.0.0

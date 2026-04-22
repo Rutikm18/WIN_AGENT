@@ -1,0 +1,287 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  jarvis-agent.wxs - WiX v4 MSI for the Jarvis Windows Agent
+
+  Build (use build_msi.ps1):
+    .\build_msi.ps1 -Version "1.0.0"
+
+  Silent install:
+    msiexec /i jarvis-agent-1.0.0.msi /qn /l*v install.log ^
+        MANAGER_URL="https://1.2.3.4:8443" ^
+        ENROLL_TOKEN="sk-enroll-abc123" ^
+        AGENT_NAME="WORKSTATION-01" ^
+        TLS_VERIFY="false"
+
+  Silent uninstall:
+    msiexec /x jarvis-agent-1.0.0.msi /qn
+-->
+
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
+
+  <Package
+    Name="Jarvis Agent"
+    Manufacturer="Jarvis Security"
+    Version="$(var.Version)"
+    UpgradeCode="{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}"
+    Language="1033"
+    Codepage="1252"
+    InstallerVersion="500"
+    Compressed="yes"
+    Scope="perMachine">
+
+    <SummaryInformation
+      Keywords="Jarvis agent endpoint security"
+      Description="Jarvis Endpoint Agent - encrypted telemetry for Windows"
+      Manufacturer="Jarvis Security" />
+
+    <MajorUpgrade
+      DowngradeErrorMessage="A newer version of Jarvis Agent is already installed."
+      AllowSameVersionUpgrades="yes"
+      Schedule="afterInstallInitialize" />
+
+    <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
+
+    <!-- ================================================================
+         MSI Properties (set via msiexec PROP=VALUE)
+         ================================================================ -->
+
+    <!-- Connection: public-facing properties (no default = user must supply) -->
+    <Property Id="MANAGER_URL"     Secure="yes" />
+    <Property Id="ENROLL_TOKEN"    Secure="yes" />
+    <Property Id="MANAGER_API_KEY" Secure="yes" />
+    <Property Id="SPKI_PIN"        Secure="yes" />
+    <Property Id="TLS_VERIFY"      Secure="yes" Value="true" />
+
+    <!-- Identity -->
+    <Property Id="AGENT_ID"   Secure="yes" />
+    <Property Id="AGENT_NAME" Secure="yes" />
+
+    <!-- Internal: full path to powershell.exe -->
+    <Property Id="PS_EXE" Value="[SystemFolder]WindowsPowerShell\v1.0\powershell.exe" />
+
+    <!-- ================================================================
+         Directory tree
+         ================================================================ -->
+
+    <!-- %ProgramFiles%\Jarvis\  -->
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLDIR" Name="Jarvis">
+        <Directory Id="BINDIR"     Name="bin" />
+        <Directory Id="SCRIPTSDIR" Name="scripts" />
+      </Directory>
+    </StandardDirectory>
+
+    <!-- %ProgramData%\Jarvis\  -->
+    <StandardDirectory Id="CommonAppDataFolder">
+      <Directory Id="DATADIR" Name="Jarvis">
+        <Directory Id="CONFIGDIR"   Name="config" />
+        <Directory Id="LOGDIR"      Name="logs" />
+        <Directory Id="SECURITYDIR" Name="security" />
+        <Directory Id="SPOOLDIR"    Name="spool" />
+        <Directory Id="SUBDATADIR"  Name="data" />
+      </Directory>
+    </StandardDirectory>
+
+    <!-- ================================================================
+         Components
+         ================================================================ -->
+
+    <!-- jarvis-agent.exe + JarvisAgent Windows Service -->
+    <Component Id="CmpAgentExe" Directory="BINDIR" Guid="{B1C2D3E4-F5A6-7890-BCDE-F12345678901}">
+      <File Id="AgentExe"
+        Name="jarvis-agent.exe"
+        Source="$(var.AgentExe)"
+        KeyPath="yes" />
+
+      <ServiceInstall
+        Id="SvcInstallAgent"
+        Name="JarvisAgent"
+        DisplayName="Jarvis Agent"
+        Description="Endpoint telemetry agent - collects system, security, and software inventory."
+        Type="ownProcess"
+        Start="auto"
+        ErrorControl="normal"
+        Account="LocalSystem"
+        Vital="yes">
+        <util:ServiceConfig
+          FirstFailureActionType="restart"
+          SecondFailureActionType="restart"
+          ThirdFailureActionType="restart"
+          RestartServiceDelayInSeconds="10"
+          ResetPeriodInDays="1" />
+        <ServiceDependency Id="Tcpip" />
+        <ServiceDependency Id="Dnscache" />
+      </ServiceInstall>
+
+      <ServiceControl Id="SvcCtrlAgentStop"  Name="JarvisAgent" Stop="both"     Remove="uninstall" Wait="yes" />
+      <ServiceControl Id="SvcCtrlAgentStart" Name="JarvisAgent" Start="install" Wait="no" />
+    </Component>
+
+    <!-- jarvis-watchdog.exe + JarvisWatchdog Windows Service -->
+    <Component Id="CmpWatchdogExe" Directory="BINDIR" Guid="{C2D3E4F5-A6B7-8901-CDEF-123456789012}">
+      <File Id="WatchdogExe"
+        Name="jarvis-watchdog.exe"
+        Source="$(var.WatchdogExe)"
+        KeyPath="yes" />
+
+      <ServiceInstall
+        Id="SvcInstallWatchdog"
+        Name="JarvisWatchdog"
+        DisplayName="Jarvis Watchdog"
+        Description="Monitors and restarts the Jarvis Agent service."
+        Type="ownProcess"
+        Start="auto"
+        ErrorControl="normal"
+        Account="LocalSystem"
+        Vital="no">
+        <util:ServiceConfig
+          FirstFailureActionType="restart"
+          SecondFailureActionType="restart"
+          ThirdFailureActionType="restart"
+          RestartServiceDelayInSeconds="30"
+          ResetPeriodInDays="1" />
+        <ServiceDependency Id="Tcpip" />
+      </ServiceInstall>
+
+      <ServiceControl Id="SvcCtrlWatchdogStop"  Name="JarvisWatchdog" Stop="both"     Remove="uninstall" Wait="yes" />
+      <ServiceControl Id="SvcCtrlWatchdogStart" Name="JarvisWatchdog" Start="install" Wait="no" />
+    </Component>
+
+    <!-- generate_config.ps1 -->
+    <Component Id="CmpGenerateConfig" Directory="SCRIPTSDIR" Guid="{D3E4F5A6-B7C8-9012-DEF0-234567890123}">
+      <File Id="GenerateConfigScript"
+        Name="generate_config.ps1"
+        Source="$(var.GenerateConfigPs1)"
+        KeyPath="yes" />
+    </Component>
+
+    <!-- manage_services.ps1 -->
+    <Component Id="CmpManageServices" Directory="SCRIPTSDIR" Guid="{E4F5A6B7-C8D9-0123-EF01-345678901234}">
+      <File Id="ManageServicesScript"
+        Name="manage_services.ps1"
+        Source="$(var.ManageServicesPs1)"
+        KeyPath="yes" />
+    </Component>
+
+    <!-- %ProgramData%\Jarvis directories with ACLs -->
+    <Component Id="CmpDataDir" Directory="DATADIR" Guid="{F5A6B7C8-D9E0-1234-F012-456789012345}">
+      <CreateFolder Directory="DATADIR">
+        <util:PermissionEx User="SYSTEM"        GenericAll="yes" />
+        <util:PermissionEx User="Administrators" GenericAll="yes" />
+      </CreateFolder>
+      <RegistryValue Root="HKLM" Key="SOFTWARE\Jarvis\Agent"
+        Name="DataDirMarker" Value="1" Type="integer" KeyPath="yes" />
+    </Component>
+
+    <Component Id="CmpConfigDir" Directory="CONFIGDIR" Guid="{A6B7C8D9-E0F1-2345-0123-567890123456}">
+      <CreateFolder />
+      <RemoveFolder Id="RemoveConfigDir" Directory="CONFIGDIR" On="uninstall" />
+    </Component>
+
+    <Component Id="CmpLogDir" Directory="LOGDIR" Guid="{B7C8D9E0-F1A2-3456-1234-678901234567}">
+      <CreateFolder />
+      <RemoveFolder Id="RemoveLogDir" Directory="LOGDIR" On="uninstall" />
+    </Component>
+
+    <Component Id="CmpSecurityDir" Directory="SECURITYDIR" Guid="{C8D9E0F1-A2B3-4567-2345-789012345678}">
+      <CreateFolder Directory="SECURITYDIR">
+        <util:PermissionEx User="SYSTEM"        GenericAll="yes" />
+        <util:PermissionEx User="Administrators" GenericAll="yes" />
+      </CreateFolder>
+      <RemoveFolder Id="RemoveSecurityDir" Directory="SECURITYDIR" On="uninstall" />
+    </Component>
+
+    <Component Id="CmpSpoolDir" Directory="SPOOLDIR" Guid="{D9E0F1A2-B3C4-5678-3456-890123456789}">
+      <CreateFolder />
+      <RemoveFolder Id="RemoveSpoolDir" Directory="SPOOLDIR" On="uninstall" />
+    </Component>
+
+    <!-- Registry: install paths, version, and service environment -->
+    <Component Id="CmpRegistry" Directory="INSTALLDIR" Guid="{E0F1A2B3-C4D5-6789-4567-901234567890}">
+      <RegistryValue Root="HKLM" Key="SOFTWARE\Jarvis\Agent"
+        Name="InstallDir" Value="[INSTALLDIR]" Type="string" KeyPath="yes" />
+      <RegistryValue Root="HKLM" Key="SOFTWARE\Jarvis\Agent"
+        Name="Version"    Value="$(var.Version)" Type="string" />
+      <RegistryValue Root="HKLM" Key="SOFTWARE\Jarvis\Agent"
+        Name="ConfigFile" Value="[CONFIGDIR]agent.toml" Type="string" />
+      <RegistryValue Root="HKLM" Key="SOFTWARE\Jarvis\Agent"
+        Name="BinDir"     Value="[BINDIR]" Type="string" />
+      <RegistryValue Root="HKLM" Key="SOFTWARE\Jarvis\Agent"
+        Name="DataDir"    Value="[DATADIR]" Type="string" />
+      <RegistryValue Root="HKLM"
+        Key="SYSTEM\CurrentControlSet\Services\JarvisAgent\Parameters"
+        Name="MACINTEL_CONFIG" Value="[CONFIGDIR]agent.toml" Type="string" />
+    </Component>
+
+    <!-- Windows Event Log source -->
+    <Component Id="CmpEventLog" Directory="INSTALLDIR" Guid="{F1A2B3C4-D5E6-7890-5678-012345678901}">
+      <util:EventSource
+        Log="Application"
+        Name="JarvisAgent"
+        EventMessageFile="[SystemFolder]EventCreate.exe" />
+    </Component>
+
+    <!-- ================================================================
+         Feature
+         ================================================================ -->
+    <Feature Id="FeatureComplete" Title="Jarvis Agent" Level="1" AllowAdvertise="no">
+      <ComponentRef Id="CmpAgentExe" />
+      <ComponentRef Id="CmpWatchdogExe" />
+      <ComponentRef Id="CmpGenerateConfig" />
+      <ComponentRef Id="CmpManageServices" />
+      <ComponentRef Id="CmpDataDir" />
+      <ComponentRef Id="CmpConfigDir" />
+      <ComponentRef Id="CmpLogDir" />
+      <ComponentRef Id="CmpSecurityDir" />
+      <ComponentRef Id="CmpSpoolDir" />
+      <ComponentRef Id="CmpRegistry" />
+      <ComponentRef Id="CmpEventLog" />
+    </Feature>
+
+    <!-- ================================================================
+         Custom Actions
+
+         CA_WriteConfig_Deferred:
+           Runs generate_config.ps1 after files land on disk.
+           Property="PS_EXE" resolves the powershell.exe path.
+           ExeCommand is a Formatted string resolved at scheduling time
+           (execute-sequence immediate phase) when all session properties
+           are available - so [MANAGER_URL] etc. expand correctly.
+
+         CA_Cleanup_Deferred:
+           Removes %ProgramData%\Jarvis on full uninstall.
+           Uses PowerShell Remove-Item for robust recursive delete.
+         ================================================================ -->
+
+    <CustomAction Id="CA_WriteConfig_Deferred"
+      Execute="deferred"
+      Impersonate="no"
+      Return="check"
+      Property="PS_EXE"
+      ExeCommand="-NonInteractive -NoProfile -ExecutionPolicy Bypass -File &quot;[INSTALLDIR]scripts\generate_config.ps1&quot; -InstallDir &quot;[INSTALLDIR]&quot; -DataDir &quot;[DATADIR]&quot; -ManagerUrl &quot;[MANAGER_URL]&quot; -TlsVerify &quot;[TLS_VERIFY]&quot; -EnrollToken &quot;[ENROLL_TOKEN]&quot; -ManagerApiKey &quot;[MANAGER_API_KEY]&quot; -SpkiPin &quot;[SPKI_PIN]&quot; -AgentId &quot;[AGENT_ID]&quot; -AgentName &quot;[AGENT_NAME]&quot;" />
+
+    <CustomAction Id="CA_Cleanup_Deferred"
+      Execute="deferred"
+      Impersonate="no"
+      Return="ignore"
+      Property="PS_EXE"
+      ExeCommand="-NonInteractive -NoProfile -ExecutionPolicy Bypass -Command &quot;Remove-Item -Path '[DATADIR]' -Recurse -Force -ErrorAction SilentlyContinue&quot;" />
+
+    <!-- ================================================================
+         Execute sequence
+         ================================================================ -->
+    <InstallExecuteSequence>
+      <!-- Generate agent.toml after files are installed, before services start -->
+      <Custom Action="CA_WriteConfig_Deferred"
+              After="InstallFiles"
+              Condition="NOT Installed OR REINSTALL" />
+
+      <!-- Remove runtime data on full uninstall -->
+      <Custom Action="CA_Cleanup_Deferred"
+              Before="RemoveFiles"
+              Condition="REMOVE~=&quot;ALL&quot;" />
+    </InstallExecuteSequence>
+
+  </Package>
+</Wix>

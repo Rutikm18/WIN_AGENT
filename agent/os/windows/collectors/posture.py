@@ -38,20 +38,24 @@ class SecurityCollector(WinBaseCollector):
 
     def collect(self) -> dict:
         defender, av_installed = self._defender()
-        uac        = self._uac()
-        bitlocker  = self._bitlocker()
-        firewall   = self._firewall()
-        secure_boot= self._secure_boot()
-        auto_update= self._auto_update()
-        raw        = {
-            "credential_guard": self._credential_guard(),
-            "wdac_enabled":     self._wdac(),
-            "smb1_enabled":     self._smb1(),
-            "lsass_ppl":        self._lsass_ppl(),
-            "last_patch_days":  self._last_patch_age(),
+        uac         = self._uac()
+        bitlocker   = self._bitlocker()
+        firewall    = self._firewall()
+        secure_boot = self._secure_boot()
+        auto_update = self._auto_update()
+        raw = {
+            "credential_guard":   self._credential_guard(),
+            "wdac_enabled":       self._wdac(),
+            "smb1_enabled":       self._smb1(),
+            "lsass_ppl":          self._lsass_ppl(),
+            "last_patch_days":    self._last_patch_age(),
+            # New Windows-specific security posture checks
+            "ntlm_level":         self._ntlm_level(),
+            "defender_exclusions": self._defender_exclusions(),
+            "wmi_persistence":    self._wmi_persistence(),
         }
         return {
-            # macOS fields — always None on Windows
+            # macOS fields — always None on Windows (data point schema alignment)
             "sip":         None,
             "gatekeeper":  None,
             "filevault":   None,
@@ -75,6 +79,98 @@ class SecurityCollector(WinBaseCollector):
         }
 
     # ── individual checks ─────────────────────────────────────────────────────
+
+    def _wmi_persistence(self) -> list[dict]:
+        """
+        Enumerate WMI event subscriptions — a common fileless persistence technique
+        (T1546.003).  Legitimate software rarely uses this; any finding warrants review.
+
+        Checks root\\subscription namespace for:
+          __EventFilter          (trigger — e.g. timer or process creation)
+          CommandLineEventConsumer / ActiveScriptEventConsumer  (action — runs code)
+          __FilterToConsumerBinding  (wires filter to consumer)
+        """
+        subscriptions: list[dict] = []
+        ps = (
+            "try {"
+            " $ns='root\\\\subscription';"
+            " $f=Get-CimInstance -Namespace $ns -ClassName __EventFilter -EA SilentlyContinue;"
+            " $c=Get-CimInstance -Namespace $ns -ClassName CommandLineEventConsumer -EA SilentlyContinue;"
+            " $a=Get-CimInstance -Namespace $ns -ClassName ActiveScriptEventConsumer -EA SilentlyContinue;"
+            " $b=Get-CimInstance -Namespace $ns -ClassName __FilterToConsumerBinding -EA SilentlyContinue;"
+            " @{filters=@($f|%{$_.Name});consumers=@($c|%{$_.Name});"
+            "   script_consumers=@($a|%{$_.Name});bindings=($b|Measure-Object).Count}"
+            " | ConvertTo-Json -Compress"
+            "} catch { '{}' }"
+        )
+        import json as _json
+        try:
+            out = self._run_ps(ps)
+            d   = _json.loads(out.strip() or "{}")
+            filters   = [str(x) for x in (d.get("filters") or []) if x]
+            consumers = [str(x) for x in (d.get("consumers") or []) if x]
+            scripts   = [str(x) for x in (d.get("script_consumers") or []) if x]
+            bindings  = int(d.get("bindings") or 0)
+            if filters or consumers or scripts or bindings:
+                subscriptions.append({
+                    "filters":          filters,
+                    "cmd_consumers":    consumers,
+                    "script_consumers": scripts,
+                    "binding_count":    bindings,
+                })
+        except Exception:
+            pass
+        return subscriptions
+
+    def _defender_exclusions(self) -> dict:
+        """
+        Read Windows Defender exclusion lists from registry.
+
+        Attackers commonly add exclusions to bypass real-time protection
+        (T1562.001 — Impair Defenses: Disable or Modify Tools).
+        Any non-empty list is a high-fidelity indicator worth alerting on.
+        """
+        import json as _json
+        exc_root = r"SOFTWARE\Microsoft\Windows Defender\Exclusions"
+        result: dict[str, list[str]] = {
+            "paths":      [],
+            "extensions": [],
+            "processes":  [],
+        }
+        try:
+            import winreg
+            hklm = winreg.HKEY_LOCAL_MACHINE
+            for sub, key in (("Paths", "paths"), ("Extensions", "extensions"),
+                             ("Processes", "processes")):
+                vals = self.reg_get(hklm, f"{exc_root}\\{sub}")
+                if isinstance(vals, dict):
+                    result[key] = list(vals.keys())
+        except Exception:
+            pass
+        return result
+
+    def _ntlm_level(self) -> int | None:
+        """
+        LmCompatibilityLevel controls the weakest NTLM authentication accepted.
+
+        0-2: accept LM/NTLMv1 (vulnerable to pass-the-hash / relay attacks)
+        3-4: NTLMv2 required for outgoing; LMv2 accepted inbound
+        5:   NTLMv2 required everywhere (CIS Level 2 recommended value)
+
+        Absence of the key (None) means the Windows default applies (varies by
+        OS version; Win10+ defaults to 3).
+        """
+        v = self.reg_get(
+            _HKLM,
+            r"SYSTEM\CurrentControlSet\Control\Lsa",
+            "LmCompatibilityLevel",
+        )
+        if v is None:
+            return None
+        try:
+            return int(v)
+        except Exception:
+            return None
 
     def _defender(self) -> tuple[str, bool]:
         """Returns (defender_status, av_installed)."""

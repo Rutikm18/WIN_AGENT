@@ -1,15 +1,15 @@
 <#
 .SYNOPSIS
-    Build the mac_intel Agent Windows MSI package.
+    Build the Jarvis Agent Windows MSI package.
 
 .DESCRIPTION
     Full pipeline:
       1. Build standalone EXEs via PyInstaller  (build_exe.ps1)
       2. Locate or download WiX Toolset (v4 preferred, v3 fallback)
-      3. Compile macintel-agent.wxs → macintel-agent.msi
+      3. Compile jarvis-agent.wxs → jarvis-agent.msi
       4. Optionally sign the MSI with Authenticode
 
-    Output: agent\os\windows\pkg\dist\macintel-agent-<version>.msi
+    Output: agent\os\windows\pkg\dist\jarvis-agent-<version>.msi
 
 .PARAMETER Version
     Semantic version string embedded in MSI and EXEs. Default: 1.0.0
@@ -36,7 +36,7 @@
 
 .EXAMPLE
     # Silent install after build:
-    msiexec /i dist\macintel-agent-1.0.0.msi /qn `
+    msiexec /i dist\jarvis-agent-1.0.0.msi /qn `
         MANAGER_URL="https://manager.corp.example:8443" `
         ENROLL_TOKEN="sk-enroll-abc123"
 #>
@@ -51,13 +51,14 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-$ScriptDir   = $PSScriptRoot
-$DistDir     = "$ScriptDir\dist"
-$AgentExe    = "$DistDir\macintel-agent.exe"
-$WatchdogExe = "$DistDir\macintel-watchdog.exe"
-$WxsFile     = "$ScriptDir\macintel-agent.wxs"
-$GenCfgPs1   = "$ScriptDir\generate_config.ps1"
-$MsiOut      = "$DistDir\macintel-agent-$Version.msi"
+$ScriptDir      = $PSScriptRoot
+$DistDir        = "$ScriptDir\dist"
+$AgentExe       = "$DistDir\jarvis-agent.exe"
+$WatchdogExe    = "$DistDir\jarvis-watchdog.exe"
+$WxsFile        = "$ScriptDir\jarvis-agent.wxs"
+$GenCfgPs1      = "$ScriptDir\generate_config.ps1"
+$MgmtPs1        = "$ScriptDir\manage_services.ps1"
+$MsiOut         = "$DistDir\jarvis-agent-$Version.msi"
 
 # ── Banner ────────────────────────────────────────────────────────────────────
 Write-Host ""
@@ -77,7 +78,7 @@ if (-not $SkipBuildExe) {
 }
 
 # Verify EXEs exist
-foreach ($exe in @($AgentExe, $WatchdogExe)) {
+foreach ($exe in @($AgentExe, $WatchdogExe, $GenCfgPs1, $MgmtPs1)) {
     if (-not (Test-Path $exe)) {
         Write-Error "Required EXE not found: $exe`n  Run without -SkipBuildExe or run build_exe.ps1 first."
     }
@@ -120,7 +121,7 @@ if ($WixV4) {
 
 # Auto-install WiX v4 as dotnet global tool if not found
 if ($WixVersion -eq 0) {
-    Write-Host "    WiX not found — installing WiX v4 via dotnet tool..." -ForegroundColor Yellow
+    Write-Host "    WiX not found - installing WiX v4 via dotnet tool..." -ForegroundColor Yellow
 
     $dotnet = Get-Command "dotnet" -ErrorAction SilentlyContinue
     if (-not $dotnet) {
@@ -140,7 +141,7 @@ then re-run this script.
 
     dotnet tool install --global wix 2>&1 | Out-Null
     if ($LASTEXITCODE -ne 0) {
-        # May already be installed but not in PATH — try to add dotnet tools dir
+        # May already be installed but not in PATH - try to add dotnet tools dir
         $toolsDir = Join-Path $env:USERPROFILE ".dotnet\tools"
         $env:PATH = "$toolsDir;$env:PATH"
     }
@@ -171,7 +172,8 @@ $WxsVars = @(
     "AgentExe=$AgentExe",
     "WatchdogExe=$WatchdogExe",
     "Version=$Version",
-    "GenerateConfigScript=$GenCfgPs1"
+    "GenerateConfigPs1=$GenCfgPs1",
+    "ManageServicesPs1=$MgmtPs1"
 )
 
 if ($WixVersion -eq 4) {
@@ -180,7 +182,7 @@ if ($WixVersion -eq 4) {
         "build",
         $WxsFile,
         "-o", $MsiOut,
-        "-ext", "WixToolset.Util.wixext"
+        "-ext", (Join-Path $env:USERPROFILE ".wix\extensions\WixToolset.Util.wixext\4.0.5\wixext4\WixToolset.Util.wixext.dll")
     )
     foreach ($v in $WxsVars) {
         $WixArgs += @("-d", $v)
@@ -194,7 +196,7 @@ if ($WixVersion -eq 4) {
 
 } else {
     # ── WiX v3: candle + light ────────────────────────────────────────────────
-    $WixObjFile = "$ScriptDir\macintel-agent.wixobj"
+    $WixObjFile = "$ScriptDir\jarvis-agent.wixobj"
 
     $CandleArgs = @($WxsFile, "-out", $WixObjFile, "-ext", "WixUtilExtension")
     foreach ($v in $WxsVars) {
@@ -242,10 +244,10 @@ if ($SignIdentity) {
         if ($LASTEXITCODE -eq 0) {
             Write-Host "    MSI signed successfully" -ForegroundColor Green
         } else {
-            Write-Warning "MSI signing failed (exit $LASTEXITCODE) — unsigned MSI retained"
+            Write-Warning "MSI signing failed (exit $LASTEXITCODE) - unsigned MSI retained"
         }
     } else {
-        Write-Warning "signtool.exe not found — MSI not signed"
+        Write-Warning "signtool.exe not found - MSI not signed"
     }
 } else {
     Write-Host "  [4/4] Signing skipped (no SignIdentity)" -ForegroundColor DarkGray
