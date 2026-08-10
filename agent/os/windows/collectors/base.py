@@ -19,6 +19,7 @@ Design notes
 from __future__ import annotations
 
 import logging
+import os
 import subprocess
 from abc import ABC, abstractmethod
 from typing import Union
@@ -62,7 +63,8 @@ class WinBaseCollector(ABC):
     def _run(self, cmd: list[str]) -> str:
         """
         Run a command, return stdout as str.
-        Suppresses the console window. Returns "" on any error.
+        Suppresses the console window (CREATE_NO_WINDOW).
+        Returns "" on any error; logs distinct messages for timeout vs not-found.
         """
         try:
             r = subprocess.run(
@@ -75,27 +77,49 @@ class WinBaseCollector(ABC):
             )
             return r.stdout or ""
         except FileNotFoundError:
-            log.debug("Command not found: %s", cmd[0] if cmd else "?")
+            # Tool is absent — not an error worth spamming; debug only.
+            log.debug("command not found: %s", cmd[0] if cmd else "?")
             return ""
         except subprocess.TimeoutExpired:
-            log.debug("Timed out after %ds: %s", self.timeout, cmd[0] if cmd else "?")
+            # Tool hung — worth a warning so operators know which collector is slow.
+            log.warning("command timed out after %ds: %s", self.timeout,
+                        cmd[0] if cmd else "?")
             return ""
         except Exception as exc:
-            log.debug("_run [%s] failed: %s", " ".join(cmd) if cmd else "?", exc)
+            log.debug("_run [%s] failed: %s", " ".join(str(c) for c in cmd), exc)
             return ""
 
     def _run_ps(self, script: str) -> str:
         """
         Run a PowerShell expression non-interactively. Returns stdout as str.
         Uses -ExecutionPolicy Bypass to avoid policy blocks in constrained environments.
+        Returns "" and logs a warning if powershell.exe is not found.
         """
-        return self._run([
-            "powershell.exe",
+        # Resolve Windows PowerShell from System32 instead of PATH.  The agent
+        # normally runs as LocalSystem; accepting a user-writable
+        # ``powershell.exe`` earlier in PATH would turn every read-only audit
+        # into a local privilege-escalation primitive.  Keep a bare-name
+        # fallback for non-Windows unit tests and unusual Windows images.
+        system_root = os.environ.get("SystemRoot") or os.environ.get("WINDIR")
+        powershell = "powershell.exe"
+        if system_root:
+            candidate = os.path.join(
+                system_root,
+                "System32",
+                "WindowsPowerShell",
+                "v1.0",
+                "powershell.exe",
+            )
+            if os.path.isfile(candidate):
+                powershell = candidate
+        result = self._run([
+            powershell,
             "-NoProfile",
             "-NonInteractive",
             "-ExecutionPolicy", "Bypass",
             "-Command", script,
         ])
+        return result
 
     # ── registry helper ───────────────────────────────────────────────────────
 

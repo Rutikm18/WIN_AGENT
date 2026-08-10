@@ -1,0 +1,158 @@
+# =============================================================================
+#  mac_intel Agent Configuration
+#
+#  QUICK START — only two fields are required:
+#  ─────────────────────────────────────────────────────────────────────────
+#  1. Set [manager] url to your manager's IP/domain
+#  2. Set [agent] name (optional — defaults to hostname)
+#
+#  The installer writes this file automatically when you run:
+#    sudo bash install.sh --manager-url https://1.2.3.4:8443
+#
+#  INSTALLATION PATHS (set by install.sh)
+#  ─────────────────────────────────────────────────────────────────────────
+#  /Library/Jarvis/bin/                    ← macintel-agent, macintel-watchdog
+#  /Library/Jarvis/
+#    agent.toml                          ← this file
+#    security/  (chmod 700)              ← API key (never put key here manually)
+#    data/                               ← telemetry queue
+#    spool/                              ← offline send queue (auto-drains)
+#  /Library/Jarvis/logs/              ← agent.log, watchdog.log
+#  /Library/LaunchDaemons/
+#    com.macintel.agent.plist
+#    com.macintel.watchdog.plist
+#
+#  SECURITY
+#  ─────────────────────────────────────────────────────────────────────────
+#  • API key is auto-generated at enrollment and stored in macOS Keychain
+#  • Never set api_key here — use the enrollment flow
+#  • Payloads: AES-256-GCM encrypted + HMAC-SHA256 signed, over TLS 1.3
+#  • Key stored under Keychain service: com.macintel.agent
+# =============================================================================
+
+# ── Agent identity ────────────────────────────────────────────────────────────
+[agent]
+id   = ""         # auto-set by installer from hardware UUID — do not change
+name = ""         # friendly name shown on dashboard (default: ComputerName)
+
+# ── Manager connection ────────────────────────────────────────────────────────
+[manager]
+url             = "https://YOUR_MANAGER_IP:8443"
+tls_verify      = true         # set to false only for self-signed certs (dev)
+timeout_sec     = 30
+retry_attempts  = 3
+retry_delay_sec = 5
+max_queue_size  = 1000
+
+# ── Enrollment ────────────────────────────────────────────────────────────────
+[enrollment]
+token    = ""          # leave empty for open-enrollment managers (default)
+                       # set to sk-enroll-xxx only if manager requires tokens
+keystore = "keychain"  # "keychain" (recommended) or "file"
+
+# ── Watchdog ──────────────────────────────────────────────────────────────────
+[watchdog]
+enabled            = true
+check_interval_sec = 30
+max_restarts       = 5
+restart_window_sec = 300
+
+# ── Paths (set by installer — do not change unless you know what you're doing) ─
+[paths]
+install_dir  = "/Library/Jarvis"
+config_dir   = "/Library/Jarvis"
+log_dir      = "/Library/Jarvis/logs"
+data_dir     = "/Library/Jarvis/data"
+security_dir = "/Library/Jarvis/security"
+spool_dir    = "/Library/Jarvis/spool"
+pid_file     = "/Library/Jarvis/jarvis-agent.pid"
+
+[binaries]
+agent    = "/Library/Jarvis/bin/macintel-agent"
+watchdog = "/Library/Jarvis/bin/macintel-watchdog"
+
+# ── Collection schedule ───────────────────────────────────────────────────────
+# All 22 sections enabled by default with appropriate intervals.
+# Circuit breakers auto-disable sections that fail repeatedly.
+[collection]
+enabled  = true
+tick_sec = 5           # orchestrator tick — how often to check if a section is due
+
+# VOLATILE — every 10 s (CPU, memory, active connections, process list)
+[collection.sections.metrics]
+enabled = true; interval_sec = 10; send = true
+
+[collection.sections.connections]
+enabled = true; interval_sec = 10; send = true
+
+[collection.sections.processes]
+enabled = true; interval_sec = 10; send = true
+
+# NETWORK — 30 s – 2 min
+[collection.sections.ports]
+enabled = true; interval_sec = 30; send = true
+
+[collection.sections.network]
+enabled = true; interval_sec = 120; send = true
+
+[collection.sections.arp]
+enabled = true; interval_sec = 120; send = true
+
+[collection.sections.mounts]
+enabled = true; interval_sec = 120; send = true
+
+# SYSTEM — every 2 min
+[collection.sections.battery]
+enabled = true; interval_sec = 120; send = true
+
+[collection.sections.openfiles]
+enabled = true; interval_sec = 120; send = true
+
+[collection.sections.services]
+enabled = true; interval_sec = 120; send = true
+
+[collection.sections.users]
+enabled = true; interval_sec = 120; send = true
+
+[collection.sections.hardware]
+enabled = true; interval_sec = 120; send = true
+
+[collection.sections.containers]
+enabled = true; interval_sec = 120; send = true
+
+# INVENTORY — every 10 min
+[collection.sections.storage]
+enabled = true; interval_sec = 600; send = true
+
+[collection.sections.tasks]
+enabled = true; interval_sec = 600; send = true
+
+# SECURITY POSTURE — hourly
+[collection.sections.security]
+enabled = true; interval_sec = 3600; send = true
+
+[collection.sections.sysctl]
+enabled = true; interval_sec = 3600; send = true
+
+[collection.sections.configs]
+enabled = true; interval_sec = 3600; send = true
+
+# FULL INVENTORY — daily
+[collection.sections.apps]
+enabled = true; interval_sec = 86400; send = true
+
+[collection.sections.packages]
+enabled = true; interval_sec = 86400; send = true
+
+[collection.sections.binaries]
+enabled = false; interval_sec = 86400; send = false   # large — opt-in
+
+[collection.sections.sbom]
+enabled = true; interval_sec = 86400; send = true
+
+# ── Logging ───────────────────────────────────────────────────────────────────
+[logging]
+level   = "INFO"
+file    = "/Library/Jarvis/logs/agent.log"
+max_mb  = 10
+backups = 5

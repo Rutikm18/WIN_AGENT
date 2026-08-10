@@ -193,10 +193,15 @@ class ArpCollector(WinBaseCollector):
                 continue
             # Normalize MAC (Windows uses dashes)
             mac_norm = mac.replace("-", ":").lower()
-            state    = parts[2] if len(parts) > 2 else None
+            # Broadcast / multicast MACs carry no useful identity. Keep the row —
+            # it still records a live IP on the segment — but null the MAC, matching
+            # the macOS arp collector's handling of incomplete/broadcast entries.
+            if mac_norm == "ff:ff:ff:ff:ff:ff" or mac_norm.startswith("01:"):
+                mac_norm = None
+            state = parts[2] if len(parts) > 2 else None
             entries.append({
                 "ip":        ip,
-                "mac":       mac_norm if mac_norm != "ff:ff:ff:ff:ff:ff" else None,
+                "mac":       mac_norm,
                 "interface": iface,
                 "state":     state,
             })

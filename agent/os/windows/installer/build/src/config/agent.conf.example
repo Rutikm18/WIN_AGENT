@@ -1,0 +1,190 @@
+# =============================================================================
+#  agent.conf — mac_intel Agent Configuration
+#
+#  Copy:  cp agent.conf.example agent.conf
+#  All sensitive values (api_key) go here — this file is gitignored.
+#
+#  The manager can override per-section intervals via manager.conf [policy.*]
+#  Agent polls /api/v1/config every 5 minutes and applies updates live.
+# =============================================================================
+
+# ── Identity ──────────────────────────────────────────────────────────────────
+[agent]
+id          = "agent-001"            # unique slug — alphanumeric + hyphens only
+name        = "My MacBook Air"       # display name on the dashboard
+description = ""                     # optional free-text
+group       = "workstations"         # logical group (shown in UI grouping)
+tags        = ["macos", "dev"]       # searchable tags
+
+# ── Manager connection ────────────────────────────────────────────────────────
+[manager]
+url              = "https://127.0.0.1:8443"
+api_key          = "REPLACE_WITH_OUTPUT_OF_KEYGEN"
+tls_verify       = false             # false only for self-signed certs in dev
+timeout_sec      = 30
+retry_attempts   = 3
+retry_delay_sec  = 5
+max_queue_size   = 500               # drop oldest payload if queue exceeds this
+poll_config_sec  = 300               # how often to pull policy updates from manager
+
+# ── Collection engine ─────────────────────────────────────────────────────────
+[collection]
+enabled  = true
+tick_sec = 5                         # scheduler wake interval — do not set < 1
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  Per-section settings
+#  interval_sec : how often to collect
+#  send         : true = ship to manager | false = collect locally only
+#  priority     : critical | high | medium | low  (used for queue ordering)
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── Volatile — 10 s ──────────────────────────────────────────────────────────
+[collection.sections.metrics]
+enabled      = true
+interval_sec = 10
+send         = true
+priority     = "high"
+
+[collection.sections.connections]
+enabled      = true
+interval_sec = 10
+send         = true
+priority     = "high"
+
+[collection.sections.processes]
+enabled      = true
+interval_sec = 10
+send         = true
+priority     = "high"
+
+# ── Network — 30 s to 2 min ──────────────────────────────────────────────────
+[collection.sections.ports]
+enabled      = true
+interval_sec = 30
+send         = true
+priority     = "high"
+
+[collection.sections.network]
+enabled      = true
+interval_sec = 120
+send         = true
+priority     = "medium"
+
+[collection.sections.arp]
+enabled      = true
+interval_sec = 120
+send         = true
+priority     = "medium"
+
+[collection.sections.mounts]
+enabled      = true
+interval_sec = 120
+send         = true
+priority     = "medium"
+
+# ── System — 2 min ───────────────────────────────────────────────────────────
+[collection.sections.battery]
+enabled      = true
+interval_sec = 120
+send         = true
+priority     = "medium"
+
+[collection.sections.openfiles]
+enabled      = true
+interval_sec = 120
+send         = true
+priority     = "medium"
+
+[collection.sections.services]
+enabled      = true
+interval_sec = 120
+send         = true
+priority     = "high"
+
+[collection.sections.users]
+enabled      = true
+interval_sec = 120
+send         = true
+priority     = "high"
+
+[collection.sections.hardware]
+enabled      = true
+interval_sec = 120
+send         = true
+priority     = "low"
+
+[collection.sections.containers]
+enabled      = true
+interval_sec = 120
+send         = true
+priority     = "medium"
+
+# ── Storage — 10 min ─────────────────────────────────────────────────────────
+[collection.sections.storage]
+enabled      = true
+interval_sec = 600
+send         = true
+priority     = "low"
+
+[collection.sections.tasks]
+enabled      = true
+interval_sec = 600
+send         = true
+priority     = "medium"
+
+# ── Security Posture — 1 hr ──────────────────────────────────────────────────
+[collection.sections.security]
+enabled      = true
+interval_sec = 3600
+send         = true
+priority     = "critical"
+
+[collection.sections.sysctl]
+enabled      = true
+interval_sec = 3600
+send         = true
+priority     = "medium"
+
+[collection.sections.configs]
+enabled      = true
+interval_sec = 3600
+send         = true
+priority     = "high"
+
+# ── Software Inventory — 24 hr ───────────────────────────────────────────────
+[collection.sections.apps]
+enabled      = true
+interval_sec = 86400
+send         = true
+priority     = "low"
+
+[collection.sections.packages]
+enabled      = true
+interval_sec = 86400
+send         = true
+priority     = "low"
+
+[collection.sections.binaries]
+enabled      = false                 # disabled by default — high volume
+interval_sec = 86400
+send         = true
+priority     = "low"
+
+[collection.sections.sbom]
+enabled      = true
+interval_sec = 86400
+send         = true
+priority     = "low"
+
+# ── Local data retention ──────────────────────────────────────────────────────
+[retention]
+raw_days    = 1                      # keep raw collected data locally for 1 day
+backup_dir  = ""                     # optional local backup path before sending
+
+# ── Logging ───────────────────────────────────────────────────────────────────
+[logging]
+level   = "INFO"                     # DEBUG | INFO | WARNING | ERROR
+file    = "agent/logs/agent.log"
+max_mb  = 10
+backups = 3

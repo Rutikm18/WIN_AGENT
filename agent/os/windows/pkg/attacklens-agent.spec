@@ -1,0 +1,88 @@
+# -*- mode: python ; coding: utf-8 -*-
+# OneDIR build — required for Windows Service compatibility.
+# PyInstaller onefile re-launches via a temp EXE, causing SCM PID mismatch.
+import os
+ROOT = os.path.abspath(os.path.join(SPECPATH, '..', '..', '..', '..'))
+
+a = Analysis(
+    [os.path.join(ROOT, 'agent', 'os', 'windows', 'agent_win_entry.py')],
+    pathex=[ROOT],
+    binaries=[],
+    datas=[],
+    hiddenimports=[
+        'agent.agent.auto_enroll',
+        'agent.agent.client_key',
+        'agent.agent.collectors',
+        'agent.agent.crypto',
+        'agent.agent.sender',
+        'agent.agent.enrollment',
+        'agent.agent.keystore',
+        'agent.agent.normalizer',
+        'agent.agent.circuit_breaker',
+        'agent.os.windows.win_agent',
+        'agent.os.windows.config_model',
+        'agent.os.windows.acl',
+        'agent.os.windows.tls_transport',
+    'agent.os.windows.reliable_outbox',
+    'agent.os.windows.single_instance',
+    'agent.os.windows.integrity',
+    'agent.os.windows.diagnostics',
+        'agent.os.windows.startup_recovery',
+        'agent.os.windows.service',
+        'agent.os.windows.keystore',
+        'agent.os.windows.normalizer',
+        'agent.os.windows.collectors',
+        'agent.os.windows.collectors.volatile',
+        'agent.os.windows.collectors.network',
+        'agent.os.windows.collectors.system',
+        'agent.os.windows.collectors.posture',
+        'agent.os.windows.collectors.inventory',
+        'agent.os.windows.collectors.sca',
+        'agent.os.windows.collectors.eventlog',
+        'agent.os.windows.collectors.security_audit',
+        'agent.os.windows.sca',
+        'agent.os.windows.sca.engine',
+        'agent.os.windows.sca.cis_windows',
+        'win32service', 'win32serviceutil', 'win32event',
+        'win32evtlog', 'servicemanager', 'win32crypt',
+        'pywintypes', 'psutil', 'cryptography',
+        'cryptography.hazmat.primitives.ciphers.aead',
+        'requests', 'urllib3', 'tomli',
+    ],
+    hookspath=[],
+    hooksconfig={},
+    runtime_hooks=[],
+    excludes=[],
+    noarchive=False,
+    optimize=0,
+)
+pyz = PYZ(a.pure)
+
+exe = EXE(
+    pyz,
+    a.scripts,
+    [],
+    exclude_binaries=True,
+    name='attacklens-agent',
+    debug=False,
+    bootloader_ignore_signals=False,
+    strip=False,
+    upx=True,
+    upx_exclude=[],
+    console=True,
+    disable_windowed_traceback=False,
+    argv_emulation=False,
+    target_arch=None,
+    codesign_identity=None,
+    entitlements_file=None,
+)
+
+coll = COLLECT(
+    exe,
+    a.binaries,
+    a.datas,
+    strip=False,
+    upx=True,
+    upx_exclude=[],
+    name='attacklens-agent',
+)

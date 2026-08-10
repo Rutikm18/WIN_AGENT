@@ -1,0 +1,467 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  attacklens.wxs  -  AttackLens Agent MSI  (WiX v4)
+
+  ══════════════════════════════════════════════════════════════════
+  SINGLE INSTALL COMMAND
+  ══════════════════════════════════════════════════════════════════
+
+  Plain HTTP development manager:
+    msiexec /i attacklens-agent-2.0.10-x64.msi /qn ACCEPT_EULA=1 ^
+        MANAGER_URL="http://13.233.122.80:8080" ^
+        ALLOW_INSECURE_TRANSPORT="true" ^
+        /l*v install.log
+
+  Production (valid CA cert):
+    msiexec /i attacklens-agent-2.0.10-x64.msi /qn ACCEPT_EULA=1 ^
+        MANAGER_IP="manager.corp.example" ^
+        MANAGER_PORT="8080" ^
+        TLS_VERIFY="false" ^
+        ALLOW_INSECURE_TRANSPORT="true" ^
+        ENROLL_TOKEN="sk-enroll-abc123..." ^
+        AGENT_NAME="WORKSTATION-01" ^
+        /l*v install.log
+
+  Silent uninstall:
+    msiexec /x attacklens-agent-2.0.10-x64.msi /qn
+
+  ══════════════════════════════════════════════════════════════════
+  WHAT HAPPENS ON INSTALL
+  ══════════════════════════════════════════════════════════════════
+  1. Files installed to C:\Program Files\AttackLens\bin\
+  2. Directories created under C:\ProgramData\AttackLens\
+  3. agent.toml written with manager URL and enrollment token
+  4. AttackLensWatchdog service registered + started
+  5. AttackLensAgent service registered + started
+  6. Agent auto-enrolls on first start (POST /api/v1/enroll)
+     → receives api_key from manager
+     → stores it in DPAPI Credential Manager (client.key)
+  7. Agent begins collecting and sending telemetry
+
+  ══════════════════════════════════════════════════════════════════
+  BUILD
+  ══════════════════════════════════════════════════════════════════
+    .\build_msi.ps1 [-Version 2.0.1]
+    .\build_attacklens_msi.ps1 [-Version 2.0.1] [-SignIdentity "CN=..."]
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util"
+     xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
+
+  <Package
+    Name="AttackLens Agent"
+    Manufacturer="AttackLens"
+    Version="$(var.Version)"
+    UpgradeCode="{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}"
+    Language="1033"
+    Codepage="1252"
+    InstallerVersion="500"
+    Compressed="yes"
+    Scope="perMachine">
+
+    <SummaryInformation
+      Keywords="AttackLens agent endpoint security telemetry"
+      Description="AttackLens Endpoint Agent for Windows"
+      Manufacturer="AttackLens" />
+
+    <MajorUpgrade
+      DowngradeErrorMessage="A newer version of AttackLens Agent is already installed."
+      Schedule="afterInstallInitialize" />
+
+    <!-- Full GUI installs are acceptance-gated by LicenseAgreementDlg. Any
+         reduced/basic/silent deployment must acknowledge the same EULA
+         explicitly with ACCEPT_EULA=1. -->
+    <Launch Condition="Installed OR (UILevel = 5) OR (ACCEPT_EULA = &quot;1&quot;)"
+            Message="You must accept the AttackLens Software License Agreement. For unattended installation, set ACCEPT_EULA=1." />
+
+    <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
+
+    <!-- Branded Add/Remove Programs icon and standard installer artwork. -->
+    <Icon Id="AttackLensProduct.ico"
+          SourceFile="$(var.ScriptDir)\assets\attacklens.ico" />
+    <Property Id="ARPPRODUCTICON" Value="AttackLensProduct.ico" />
+    <Property Id="ARPCOMMENTS"
+              Value="AttackLens endpoint security telemetry agent" />
+
+    <!-- WixUI_InstallDir includes an acceptance-gated LicenseAgreementDlg.
+         These variables replace its placeholder license and stock artwork. -->
+    <WixVariable Id="WixUILicenseRtf"
+                 Value="$(var.ScriptDir)\assets\license.rtf" />
+    <WixVariable Id="WixUIBannerBmp"
+                 Value="$(var.ScriptDir)\assets\installer-banner.bmp" />
+    <WixVariable Id="WixUIDialogBmp"
+                 Value="$(var.ScriptDir)\assets\installer-dialog.bmp" />
+
+    <!-- GUI pages are defined in attacklens-ui.wxs and feed the same public
+         properties consumed by the deferred config generator. -->
+    <UI>
+      <UIRef Id="AttackLensUI" />
+    </UI>
+
+    <!-- ══════════════════════════════════════════════════════════════
+         PUBLIC MSI PROPERTIES
+         Passed on the msiexec command line at install time.
+         All uppercase names are public (user-configurable).
+         ══════════════════════════════════════════════════════════════ -->
+
+    <!-- Manager host: IP address or FQDN (no scheme, no port) -->
+    <Property Id="MANAGER_URL"  Secure="yes" />
+    <Property Id="MANAGER_IP" Secure="yes" />
+    <!-- Deployment default requested for the current HTTP manager. -->
+    <Property Id="MANAGER_PORT" Value="8080" Secure="yes" />
+    <!-- HTTP/8080 compatibility default; production HTTPS should set true. -->
+    <Property Id="TLS_VERIFY"    Value="false" Secure="yes" />
+    <Property Id="ALLOW_INSECURE_TRANSPORT" Value="true" Secure="yes" />
+    <Property Id="CA_BUNDLE"    Secure="yes" />
+    <Property Id="SPKI_PIN"     Secure="yes" />
+    <Property Id="COLLECTION_PROFILE" Value="standard" Secure="yes" />
+    <Property Id="PRESERVE_STATE" Value="1" Secure="yes" />
+    <Property Id="PURGE_ON_UNINSTALL" Value="0" Secure="yes">
+      <!-- Persist the admin's GUI choice so a later uninstall can reuse it. -->
+      <RegistrySearch Id="PurgeOnUninstallSearch"
+        Root="HKLM"
+        Key="SOFTWARE\AttackLens\Agent"
+        Name="PurgeOnUninstall"
+        Type="raw" />
+    </Property>
+    <!-- Enrollment token from manager first-boot logs (sk-enroll-...) -->
+    <!-- Secure="yes" → value is not logged in MSI logs and is passed to elevated context -->
+    <Property Id="ENROLL_TOKEN"  Secure="yes" Hidden="yes" />
+    <!-- Opaque Base64 JSON staged at the end of the interactive UI sequence.
+         Uppercase+Secure crosses the client/elevated-server boundary; Hidden
+         prevents enrollment data from appearing in verbose MSI logs. -->
+    <Property Id="ATTACKLENS_CONFIG_DATA" Secure="yes" Hidden="yes" />
+    <Property Id="ACCEPT_EULA" Secure="yes" />
+    <!-- Human label shown in the dashboard. Defaults to COMPUTERNAME at install time. -->
+    <Property Id="AGENT_NAME"    Secure="yes" />
+
+    <!-- ── Directory layout ───────────────────────────────────────────────── -->
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLDIR" Name="AttackLens">
+        <Directory Id="TOOLSDIR" Name="tools" />
+        <Directory Id="BINDIR" Name="bin">
+          <Directory Id="AGENTBINDIR" Name="attacklens-agent">
+            <Directory Id="AGENTINTERNALDIR" Name="_internal" />
+          </Directory>
+          <Directory Id="WATCHDOGBINDIR" Name="attacklens-watchdog">
+            <Directory Id="WATCHDOGINTERNALDIR" Name="_internal" />
+          </Directory>
+        </Directory>
+      </Directory>
+    </StandardDirectory>
+
+    <StandardDirectory Id="CommonAppDataFolder">
+      <Directory Id="DATADIR" Name="AttackLens">
+        <Directory Id="CONFIGDIR" Name="config"   />
+        <Directory Id="LOGDIR"    Name="logs"     />
+        <Directory Id="SECDIR"    Name="security" />
+        <Directory Id="SPOOLDIR"  Name="spool"    />
+        <Directory Id="AGENTDATA" Name="data"     />
+        <Directory Id="STATUSDIR" Name="status"   />
+        <Directory Id="SUPPORTDIR" Name="support" />
+      </Directory>
+    </StandardDirectory>
+
+    <!-- ── AttackLensWatchdog service ──────────────────────────────────────
+         Independent of Agent; its startup grace prevents install/start races. -->
+    <Component Id="CmpWatchdogExe" Directory="WATCHDOGBINDIR"
+               Guid="{A1B2C3D4-E5F6-0001-ABCD-000000000002}">
+      <File Id="WatchdogExe"
+            Name="attacklens-watchdog.exe"
+            Source="$(var.WatchdogExeDir)\attacklens-watchdog.exe"
+            KeyPath="yes" />
+
+      <ServiceInstall
+        Id="SvcWatchdog"
+        Name="AttackLensWatchdog"
+        DisplayName="AttackLens Watchdog"
+        Description="Monitors AttackLens Agent and restarts it if it stops. Rate-limited to prevent restart storms."
+        Type="ownProcess"
+        Start="auto"
+        ErrorControl="normal"
+        Account="LocalSystem"
+        Vital="yes">
+        <!-- Intentionally no Agent dependency: the watchdog must remain
+             startable when the monitored service cannot initialize. -->
+        <util:ServiceConfig
+          FirstFailureActionType="restart"
+          SecondFailureActionType="restart"
+          ThirdFailureActionType="restart"
+          RestartServiceDelayInSeconds="30"
+          ResetPeriodInDays="1" />
+      </ServiceInstall>
+
+      <!-- Start on install; stop+remove on uninstall -->
+      <ServiceControl Id="SvcWatchdogCtrl" Name="AttackLensWatchdog"
+                      Start="install" Stop="both" Remove="uninstall" Wait="yes" />
+    </Component>
+
+    <!-- ── AttackLensAgent service ────────────────────────────────────────── -->
+    <Component Id="CmpAgentExe" Directory="AGENTBINDIR"
+               Guid="{A1B2C3D4-E5F6-0001-ABCD-000000000001}">
+      <File Id="AgentExe"
+            Name="attacklens-agent.exe"
+            Source="$(var.AgentExeDir)\attacklens-agent.exe"
+            KeyPath="yes" />
+
+      <ServiceInstall
+        Id="SvcAgent"
+        Name="AttackLensAgent"
+        DisplayName="AttackLens Agent"
+        Description="Endpoint telemetry agent — collects system metrics, security posture, and software inventory. Sends encrypted data to the AttackLens manager."
+        Type="ownProcess"
+        Start="auto"
+        ErrorControl="normal"
+        Account="LocalSystem"
+        Vital="yes">
+        <util:ServiceConfig
+          FirstFailureActionType="restart"
+          SecondFailureActionType="restart"
+          ThirdFailureActionType="restart"
+          RestartServiceDelayInSeconds="10"
+          ResetPeriodInDays="1" />
+      </ServiceInstall>
+
+      <!-- Start on install; stop+remove on uninstall -->
+      <ServiceControl Id="SvcAgentCtrl" Name="AttackLensAgent"
+                      Start="install" Stop="both" Remove="uninstall" Wait="yes" />
+    </Component>
+
+    <!-- ── ProgramData directories with ACLs ─────────────────────────────── -->
+    <Component Id="CmpDataDir" Directory="DATADIR"
+               Guid="{A1B2C3D4-E5F6-0003-ABCD-000000000001}">
+      <CreateFolder Directory="DATADIR">
+        <util:PermissionEx User="SYSTEM"         GenericAll="yes" />
+        <util:PermissionEx User="Administrators" GenericAll="yes" />
+      </CreateFolder>
+      <RegistryValue Root="HKLM" Key="SOFTWARE\AttackLens\Agent"
+        Name="DataDirMarker" Value="1" Type="integer" KeyPath="yes" />
+    </Component>
+
+    <Component Id="CmpLogDir" Directory="LOGDIR"
+               Guid="{A1B2C3D4-E5F6-0003-ABCD-000000000002}">
+      <CreateFolder />
+      <RemoveFolder Id="RmLogDir" Directory="LOGDIR" On="uninstall" />
+    </Component>
+
+    <Component Id="CmpSecDir" Directory="SECDIR"
+               Guid="{A1B2C3D4-E5F6-0003-ABCD-000000000003}">
+      <!-- Security dir: SYSTEM + Administrators only (DPAPI key files) -->
+      <CreateFolder Directory="SECDIR">
+        <util:PermissionEx User="SYSTEM"         GenericAll="yes" />
+        <util:PermissionEx User="Administrators" GenericAll="yes" />
+      </CreateFolder>
+      <RemoveFolder Id="RmSecDir" Directory="SECDIR" On="uninstall" />
+    </Component>
+
+    <Component Id="CmpSpoolDir" Directory="SPOOLDIR"
+               Guid="{A1B2C3D4-E5F6-0003-ABCD-000000000004}">
+      <CreateFolder />
+      <RemoveFolder Id="RmSpoolDir" Directory="SPOOLDIR" On="uninstall" />
+    </Component>
+
+    <Component Id="CmpConfigDir" Directory="CONFIGDIR"
+               Guid="{A1B2C3D4-E5F6-0003-ABCD-000000000005}">
+      <CreateFolder />
+      <RemoveFolder Id="RmConfigDir" Directory="CONFIGDIR" On="uninstall" />
+    </Component>
+
+    <Component Id="CmpAgentDataDir" Directory="AGENTDATA"
+               Guid="{A1B2C3D4-E5F6-0003-ABCD-000000000006}">
+      <CreateFolder />
+      <RemoveFolder Id="RmAgentData" Directory="AGENTDATA" On="uninstall" />
+    </Component>
+
+    <Component Id="CmpStatusDir" Directory="STATUSDIR"
+               Guid="{A1B2C3D4-E5F6-0003-ABCD-000000000007}">
+      <CreateFolder Directory="STATUSDIR">
+        <util:PermissionEx User="SYSTEM" GenericAll="yes" />
+        <util:PermissionEx User="Administrators" GenericAll="yes" />
+        <util:PermissionEx User="Users" GenericRead="yes" Traverse="yes" />
+      </CreateFolder>
+      <RemoveFolder Id="RmStatusDir" Directory="STATUSDIR" On="uninstall" />
+    </Component>
+
+    <Component Id="CmpSupportDir" Directory="SUPPORTDIR"
+               Guid="{A1B2C3D4-E5F6-0003-ABCD-000000000008}">
+      <CreateFolder />
+      <RemoveFolder Id="RmSupportDir" Directory="SUPPORTDIR" On="uninstall" />
+    </Component>
+
+    <!-- ── Registry ──────────────────────────────────────────────────────── -->
+    <Component Id="CmpRegistry" Directory="INSTALLDIR"
+               Guid="{A1B2C3D4-E5F6-0004-ABCD-000000000001}">
+      <RegistryValue Root="HKLM" Key="SOFTWARE\AttackLens\Agent"
+        Name="InstallDir" Value="[INSTALLDIR]" Type="string" KeyPath="yes" />
+      <RegistryValue Root="HKLM" Key="SOFTWARE\AttackLens\Agent"
+        Name="Version"    Value="$(var.Version)" Type="string" />
+      <RegistryValue Root="HKLM" Key="SOFTWARE\AttackLens\Agent"
+        Name="DataDir"    Value="[CommonAppDataFolder]AttackLens\" Type="string" />
+      <RegistryValue Root="HKLM" Key="SOFTWARE\AttackLens\Agent"
+        Name="PurgeOnUninstall" Value="[PURGE_ON_UNINSTALL]" Type="string" />
+      <RegistryValue Root="HKLM" Key="SOFTWARE\AttackLens\Agent"
+        Name="BinDir"     Value="[BINDIR]" Type="string" />
+      <RegistryValue Root="HKLM" Key="SOFTWARE\AttackLens\Agent"
+        Name="ConfigPath" Value="[CONFIGDIR]agent.toml" Type="string" />
+
+      <!-- Service reads its config path from this registry value at startup -->
+      <RegistryValue Root="HKLM"
+        Key="SYSTEM\CurrentControlSet\Services\AttackLensAgent\Parameters"
+        Name="ATTACKLENS_CONFIG" Value="[CONFIGDIR]agent.toml" Type="string" />
+      <!-- Compatibility alias for older service binaries and upgrades. -->
+      <RegistryValue Root="HKLM"
+        Key="SYSTEM\CurrentControlSet\Services\AttackLensAgent\Parameters"
+        Name="MACINTEL_CONFIG" Value="[CONFIGDIR]agent.toml" Type="string" />
+
+      <!-- Delayed auto-start: services start 2 min after boot (after network is up) -->
+      <RegistryValue Root="HKLM"
+        Key="SYSTEM\CurrentControlSet\Services\AttackLensAgent"
+        Name="DelayedAutostart" Value="1" Type="integer" />
+      <RegistryValue Root="HKLM"
+        Key="SYSTEM\CurrentControlSet\Services\AttackLensAgent"
+        Name="PreshutdownTimeout" Value="180000" Type="integer" />
+      <RegistryValue Root="HKLM"
+        Key="SYSTEM\CurrentControlSet\Services\AttackLensWatchdog"
+        Name="DelayedAutostart" Value="1" Type="integer" />
+    </Component>
+
+    <!-- Keep custom-action command rows short by installing their scripts. -->
+    <Component Id="CmpInstallerTools" Directory="TOOLSDIR"
+               Guid="{A1B2C3D4-E5F6-0005-ABCD-000000000001}">
+      <File Id="ConfigGeneratorScript"
+            Name="gen_config.ps1"
+            Source="$(var.ScriptDir)\gen_config.ps1"
+            KeyPath="yes" />
+      <File Id="PurgeStateScript"
+            Name="purge_state.ps1"
+            Source="$(var.ScriptDir)\purge_state.ps1" />
+      <File Id="ConfigureManagerScript"
+            Name="configure-manager.ps1"
+            Source="$(var.ScriptDir)\configure-manager.ps1" />
+      <File Id="AgentStatusScript"
+            Name="attacklens-status.ps1"
+            Source="$(var.ScriptDir)\attacklens-status.ps1" />
+      <File Id="EditAgentConfigScript"
+            Name="edit-agent-config.ps1"
+            Source="$(var.ScriptDir)\edit-agent-config.ps1" />
+    </Component>
+
+    <Component Id="CmpInstallManifest" Directory="INSTALLDIR"
+               Guid="{A1B2C3D4-E5F6-0005-ABCD-000000000002}">
+      <File Id="InstallManifest"
+            Name="install-manifest.json"
+            Source="$(var.ManifestPath)"
+            KeyPath="yes" />
+      <File Id="RuntimeLocationReadme"
+            Name="RUNTIME_LOCATION.txt"
+            Source="$(var.ScriptDir)\RUNTIME_LOCATION.txt" />
+    </Component>
+
+    <!-- ══════════════════════════════════════════════════════════════
+         CONFIG-GENERATION CUSTOM ACTION
+         Runs the installed gen_config.ps1 after files are
+         installed and registry is written, before services start.
+
+         Runtime properties are Base64 JSON prepared by an immediate action,
+         exposed as CustomActionData, hidden from MSI logs, and passed
+         explicitly to the deferred SYSTEM PowerShell process.
+         ══════════════════════════════════════════════════════════════ -->
+
+    <!-- Prepare GUI/silent properties before the original MSI session becomes
+         unavailable to deferred actions. The property name matches the
+         deferred action ID, as required by Windows Installer. -->
+    <Binary Id="PrepareConfigDataScript"
+      SourceFile="$(var.ScriptDir)\prepare_config_data.js" />
+    <CustomAction Id="CA_PrepareWriteConfig"
+      BinaryRef="PrepareConfigDataScript"
+      JScriptCall="PrepareConfigData"
+      Bitness="always64"
+      Execute="immediate"
+      Return="check" />
+    <CustomAction Id="CA_StageWriteConfigUI"
+      BinaryRef="PrepareConfigDataScript"
+      JScriptCall="StageConfigDataFromUI"
+      Execute="immediate"
+      Return="check" />
+
+    <!-- Deferred CA runs PowerShell with the installed gen_config.ps1 as
+         NT AUTHORITY\SYSTEM and explicitly consumes hidden CustomActionData. -->
+    <CustomAction Id="CA_WriteConfig"
+      Directory="TOOLSDIR"
+      ExeCommand="&quot;[System64Folder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;gen_config.ps1&quot; -EncodedCustomActionData &quot;[CustomActionData]&quot;"
+      Execute="deferred"
+      Impersonate="no"
+      HideTarget="yes"
+      Return="check" />
+
+    <!-- Explicit purge is opt-in and runs after ServiceControl stops services
+         but before RemoveFiles/RemoveFolders process the installed package. -->
+    <SetProperty Id="CA_PurgeState"
+      Value="D=[DATADIR]"
+      Sequence="execute"
+      Before="CA_PurgeState" />
+    <CustomAction Id="CA_PurgeState"
+      Directory="TOOLSDIR"
+      ExeCommand="&quot;[System64Folder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;purge_state.ps1&quot;"
+      Execute="deferred"
+      Impersonate="no"
+      Return="check" />
+
+    <!-- Set service SID types through SCM after service registration. This
+         avoids the MSI ServiceConfig table, whose behavior is unreliable. -->
+    <CustomAction Id="CA_SetAgentServiceSid"
+      Directory="System64Folder"
+      ExeCommand="&quot;[System64Folder]sc.exe&quot; sidtype AttackLensAgent unrestricted"
+      Execute="deferred"
+      Impersonate="no"
+      Return="check" />
+    <CustomAction Id="CA_SetWatchdogServiceSid"
+      Directory="System64Folder"
+      ExeCommand="&quot;[System64Folder]sc.exe&quot; sidtype AttackLensWatchdog unrestricted"
+      Execute="deferred"
+      Impersonate="no"
+      Return="check" />
+
+    <InstallUISequence>
+      <!-- Capture final dialog values before ExecuteAction switches from the
+           interactive MSI client to the elevated Windows Installer server. -->
+      <Custom Action="CA_StageWriteConfigUI" After="ProgressDlg"
+              Condition="NOT Installed OR REINSTALL" />
+    </InstallUISequence>
+
+    <InstallExecuteSequence>
+      <!-- After files land + registry is written; before services are registered/started -->
+      <Custom Action="CA_PrepareWriteConfig" Before="CA_WriteConfig" Condition="NOT Installed OR REINSTALL" />
+      <Custom Action="CA_WriteConfig" Before="InstallServices" Condition="NOT Installed OR REINSTALL" />
+      <Custom Action="CA_SetAgentServiceSid" After="InstallServices"
+              Condition="NOT Installed OR REINSTALL" />
+      <Custom Action="CA_SetWatchdogServiceSid" After="CA_SetAgentServiceSid"
+              Condition="NOT Installed OR REINSTALL" />
+      <Custom Action="CA_PurgeState" Before="RemoveFiles"
+              Condition="REMOVE~=&quot;ALL&quot; AND PURGE_ON_UNINSTALL=&quot;1&quot;" />
+    </InstallExecuteSequence>
+
+    <!-- ── Feature ────────────────────────────────────────────────────────── -->
+    <!-- Watchdog listed before Agent so it starts first in StartServices     -->
+    <Feature Id="FeatureComplete" Title="AttackLens Agent" Level="1"
+             AllowAdvertise="no" ConfigurableDirectory="INSTALLDIR">
+      <ComponentRef Id="CmpWatchdogExe" />
+      <ComponentRef Id="CmpAgentExe" />
+      <ComponentRef Id="CmpDataDir" />
+      <ComponentRef Id="CmpLogDir" />
+      <ComponentRef Id="CmpSecDir" />
+      <ComponentRef Id="CmpSpoolDir" />
+      <ComponentRef Id="CmpConfigDir" />
+      <ComponentRef Id="CmpAgentDataDir" />
+      <ComponentRef Id="CmpStatusDir" />
+      <ComponentRef Id="CmpSupportDir" />
+      <ComponentRef Id="CmpRegistry" />
+      <ComponentRef Id="CmpInstallerTools" />
+      <ComponentRef Id="CmpInstallManifest" />
+      <!-- _internal dependency files — ComponentGroups generated by build_msi.ps1 -->
+      <ComponentGroupRef Id="WatchdogInternalFiles" />
+      <ComponentGroupRef Id="AgentInternalFiles" />
+    </Feature>
+
+  </Package>
+</Wix>

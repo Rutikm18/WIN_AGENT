@@ -1,0 +1,17 @@
+# agent/requirements.txt — mac_intel agent dependencies
+# Install: pip install -r agent/requirements.txt
+
+# Crypto — AES-256-GCM, HKDF
+cryptography>=42.0.0
+
+# TOML config (stdlib in Python 3.11+; backport for 3.9/3.10)
+tomli>=2.0.0; python_version < "3.11"
+
+# HTTP client — used by sender.py
+requests>=2.31.0
+
+# System metrics (optional but recommended for richer metrics collection)
+psutil>=5.9.0
+
+# macOS Keychain access for secure key storage (optional — falls back to file)
+keyring>=24.0.0

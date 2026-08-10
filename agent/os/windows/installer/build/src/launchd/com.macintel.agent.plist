@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+    "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  /Library/LaunchDaemons/com.macintel.agent.plist
+  ─────────────────────────────────────────────────
+  LaunchDaemon that keeps the mac_intel WATCHDOG running.
+  The watchdog in turn starts and monitors the agent binary.
+
+  Hierarchy:
+    launchd (KeepAlive=true — OS restarts watchdog if it exits)
+      └── macintel-watchdog
+            └── macintel-agent  (watchdog restarts agent on crash)
+
+  Install:
+    sudo cp com.macintel.agent.plist /Library/LaunchDaemons/
+    sudo chown root:wheel /Library/LaunchDaemons/com.macintel.agent.plist
+    sudo chmod 644 /Library/LaunchDaemons/com.macintel.agent.plist
+    sudo launchctl load -w /Library/LaunchDaemons/com.macintel.agent.plist
+
+  Unload:
+    sudo launchctl unload /Library/LaunchDaemons/com.macintel.agent.plist
+-->
+<plist version="1.0">
+<dict>
+    <!-- Service identity -->
+    <key>Label</key>
+    <string>com.macintel.agent</string>
+
+    <!-- Run the watchdog (it starts/monitors the agent binary) -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>/opt/macintel/bin/macintel-watchdog</string>
+        <string>--config</string>
+        <string>/Library/Application Support/MacIntel/agent.conf</string>
+    </array>
+
+    <!-- Start at boot and keep running -->
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+
+    <!-- Run as root (required for full telemetry access) -->
+    <key>UserName</key>
+    <string>root</string>
+
+    <!-- Logs (launchd-level stdout/stderr before watchdog sets up its own logging) -->
+    <key>StandardOutPath</key>
+    <string>/Library/Logs/MacIntel/launchd-stdout.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Library/Logs/MacIntel/launchd-stderr.log</string>
+
+    <!-- Throttle rapid restarts — launchd waits 10s before restarting watchdog -->
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+
+    <!-- Background priority -->
+    <key>ProcessType</key>
+    <string>Background</string>
+
+    <!-- Working directory -->
+    <key>WorkingDirectory</key>
+    <string>/opt/macintel</string>
+</dict>
+</plist>

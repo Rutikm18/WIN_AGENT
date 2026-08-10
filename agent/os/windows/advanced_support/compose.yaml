@@ -1,0 +1,13 @@
+services:
+  diagnostics:
+    build:
+      context: ../../../..
+      dockerfile: agent/os/windows/advanced_support/Dockerfile
+    command: ["--all"]
+    read_only: true
+    tmpfs:
+      - /tmp
+    network_mode: none
+    security_opt:
+      - no-new-privileges:true
+

@@ -1,0 +1,268 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Fragment>
+    <DirectoryRef Id="SRCDIR">
+      <Directory Id="d_agent" Name="agent">
+        <Directory Id="d_agent_collectors" Name="collectors" />
+      </Directory>
+      <Directory Id="d_config" Name="config" />
+      <Directory Id="d_launchd" Name="launchd" />
+      <Directory Id="d_pkg" Name="pkg">
+        <Directory Id="d_pkg_scripts" Name="scripts" />
+      </Directory>
+      <Directory Id="d_scripts" Name="scripts" />
+      <Directory Id="d_spool" Name="spool" />
+    </DirectoryRef>
+    <ComponentGroup Id="SourceGroup">
+      <Component Id="c0000_agent_entry_py" Directory="SRCDIR" Guid="{8E4E78A8-C244-FE34-998E-2747587277BC}">
+        <File Id="f0000_agent_entry_py" Source="$(var.BuildSrcDir)\agent_entry.py" />
+      </Component>
+      <Component Id="c0001_pyproject_toml" Directory="SRCDIR" Guid="{EAD10341-AE56-6B34-A99C-C81DDE786797}">
+        <File Id="f0001_pyproject_toml" Source="$(var.BuildSrcDir)\pyproject.toml" />
+      </Component>
+      <Component Id="c0002_requirements_txt" Directory="SRCDIR" Guid="{67B565F4-5B8C-473C-B3D5-28B53523696D}">
+        <File Id="f0002_requirements_txt" Source="$(var.BuildSrcDir)\requirements.txt" />
+      </Component>
+      <Component Id="c0003_init___py" Directory="SRCDIR" Guid="{6C33BB3C-6987-8431-A0F5-3325A4490A81}">
+        <File Id="f0003_init___py" Source="$(var.BuildSrcDir)\__init__.py" />
+      </Component>
+      <Component Id="c0004_auto_enroll_py" Directory="d_agent" Guid="{89FC3878-0C34-2F3F-92C6-02346FF34273}">
+        <File Id="f0004_auto_enroll_py" Source="$(var.BuildSrcDir)\agent\auto_enroll.py" />
+      </Component>
+      <Component Id="c0005_circuit_breaker_py" Directory="d_agent" Guid="{ACB80833-B20A-CD39-9957-7E6BE9EFE591}">
+        <File Id="f0005_circuit_breaker_py" Source="$(var.BuildSrcDir)\agent\circuit_breaker.py" />
+      </Component>
+      <Component Id="c0006_client_key_py" Directory="d_agent" Guid="{1CEA5E2B-F8C6-B837-895B-BAB4789A8D5B}">
+        <File Id="f0006_client_key_py" Source="$(var.BuildSrcDir)\agent\client_key.py" />
+      </Component>
+      <Component Id="c0007_config_py" Directory="d_agent" Guid="{591E53CC-E3BF-143B-B939-43E2F18E3291}">
+        <File Id="f0007_config_py" Source="$(var.BuildSrcDir)\agent\config.py" />
+      </Component>
+      <Component Id="c0008_core_py" Directory="d_agent" Guid="{43AA0F4D-E313-7E34-B5E6-5057B12E8AB7}">
+        <File Id="f0008_core_py" Source="$(var.BuildSrcDir)\agent\core.py" />
+      </Component>
+      <Component Id="c0009_crypto_py" Directory="d_agent" Guid="{399EC870-FA56-9933-B963-6C7F37CFCEAA}">
+        <File Id="f0009_crypto_py" Source="$(var.BuildSrcDir)\agent\crypto.py" />
+      </Component>
+      <Component Id="c0010_enrollment_py" Directory="d_agent" Guid="{997B0420-D64F-3534-A46D-CC8130724398}">
+        <File Id="f0010_enrollment_py" Source="$(var.BuildSrcDir)\agent\enrollment.py" />
+      </Component>
+      <Component Id="c0011_keystore_py" Directory="d_agent" Guid="{EDA10478-0E23-8939-8D77-C5DD625282C0}">
+        <File Id="f0011_keystore_py" Source="$(var.BuildSrcDir)\agent\keystore.py" />
+      </Component>
+      <Component Id="c0012_normalizer_py" Directory="d_agent" Guid="{52AF8B0A-0AFD-783A-BC2B-C2D4EDC96A3C}">
+        <File Id="f0012_normalizer_py" Source="$(var.BuildSrcDir)\agent\normalizer.py" />
+      </Component>
+      <Component Id="c0013_sender_py" Directory="d_agent" Guid="{22E3D98C-3641-7F3E-B7E8-4C163DFE800B}">
+        <File Id="f0013_sender_py" Source="$(var.BuildSrcDir)\agent\sender.py" />
+      </Component>
+      <Component Id="c0014_watchdog_py" Directory="d_agent" Guid="{28D09D33-D409-E534-B882-05331D21E7AC}">
+        <File Id="f0014_watchdog_py" Source="$(var.BuildSrcDir)\agent\watchdog.py" />
+      </Component>
+      <Component Id="c0015_init___py" Directory="d_agent" Guid="{7F36342D-F39D-593D-829E-E7BB15C047FF}">
+        <File Id="f0015_init___py" Source="$(var.BuildSrcDir)\agent\__init__.py" />
+      </Component>
+      <Component Id="c0016_base_py" Directory="d_agent_collectors" Guid="{8BF7B510-49D9-D63A-A30C-7BBEE5C3A954}">
+        <File Id="f0016_base_py" Source="$(var.BuildSrcDir)\agent\collectors\base.py" />
+      </Component>
+      <Component Id="c0017_inventory_py" Directory="d_agent_collectors" Guid="{880A3985-23A9-9F33-AA04-6E39AD4A0B4A}">
+        <File Id="f0017_inventory_py" Source="$(var.BuildSrcDir)\agent\collectors\inventory.py" />
+      </Component>
+      <Component Id="c0018_network_py" Directory="d_agent_collectors" Guid="{28D621C1-7027-1830-88DB-1FA72C807644}">
+        <File Id="f0018_network_py" Source="$(var.BuildSrcDir)\agent\collectors\network.py" />
+      </Component>
+      <Component Id="c0019_posture_py" Directory="d_agent_collectors" Guid="{8D6CF65D-7F94-8D31-B381-E786396FC5BD}">
+        <File Id="f0019_posture_py" Source="$(var.BuildSrcDir)\agent\collectors\posture.py" />
+      </Component>
+      <Component Id="c0020_system_py" Directory="d_agent_collectors" Guid="{8EE683A2-D663-AB36-901C-48379373271A}">
+        <File Id="f0020_system_py" Source="$(var.BuildSrcDir)\agent\collectors\system.py" />
+      </Component>
+      <Component Id="c0021_volatile_py" Directory="d_agent_collectors" Guid="{2752A870-5D7A-9D31-8254-3223A3A8D081}">
+        <File Id="f0021_volatile_py" Source="$(var.BuildSrcDir)\agent\collectors\volatile.py" />
+      </Component>
+      <Component Id="c0022_init___py" Directory="d_agent_collectors" Guid="{27D47673-C944-213D-AE6C-C51804AAFD44}">
+        <File Id="f0022_init___py" Source="$(var.BuildSrcDir)\agent\collectors\__init__.py" />
+      </Component>
+      <Component Id="c0023_agent_conf_example" Directory="d_config" Guid="{AC7D5A98-A675-643E-A15B-9784B48DEC05}">
+        <File Id="f0023_agent_conf_example" Source="$(var.BuildSrcDir)\config\agent.conf.example" />
+      </Component>
+      <Component Id="c0024_agent_toml_example" Directory="d_config" Guid="{BAA18128-C6AD-283B-946A-E07CF63C2750}">
+        <File Id="f0024_agent_toml_example" Source="$(var.BuildSrcDir)\config\agent.toml.example" />
+      </Component>
+      <Component Id="c0025_com_macintel_agent_plist" Directory="d_launchd" Guid="{A6255094-2D6F-7535-8E5D-F7D11E2A5A28}">
+        <File Id="f0025_com_macintel_agent_plist" Source="$(var.BuildSrcDir)\launchd\com.macintel.agent.plist" />
+      </Component>
+      <Component Id="c0026_normalizer_py" Directory="d_os_linux" Guid="{B3B370B1-4399-E338-9C44-138608C0E0B3}">
+        <File Id="f0026_normalizer_py" Source="$(var.BuildSrcDir)\os\linux\normalizer.py" />
+      </Component>
+      <Component Id="c0027_init___py" Directory="d_os_linux" Guid="{FD78867A-F66A-143A-8A70-F7903B4B593D}">
+        <File Id="f0027_init___py" Source="$(var.BuildSrcDir)\os\linux\__init__.py" />
+      </Component>
+      <Component Id="c0028_keystore_py" Directory="d_os_macos" Guid="{4386F979-75C6-853D-AD4A-67B30B7610AE}">
+        <File Id="f0028_keystore_py" Source="$(var.BuildSrcDir)\os\macos\keystore.py" />
+      </Component>
+      <Component Id="c0029_launchd_py" Directory="d_os_macos" Guid="{0BE76443-053F-CC30-AC87-180F22572D1D}">
+        <File Id="f0029_launchd_py" Source="$(var.BuildSrcDir)\os\macos\launchd.py" />
+      </Component>
+      <Component Id="c0030_normalizer_py" Directory="d_os_macos" Guid="{A8BEF836-66E1-953C-A1C1-969D2B94758B}">
+        <File Id="f0030_normalizer_py" Source="$(var.BuildSrcDir)\os\macos\normalizer.py" />
+      </Component>
+      <Component Id="c0031_requirements_txt" Directory="d_os_macos" Guid="{086E79F3-C02F-FC3A-8302-A614689A9B63}">
+        <File Id="f0031_requirements_txt" Source="$(var.BuildSrcDir)\os\macos\requirements.txt" />
+      </Component>
+      <Component Id="c0032_init___py" Directory="d_os_macos" Guid="{BD570C2D-2D17-7F30-8AC0-3523BE739D1B}">
+        <File Id="f0032_init___py" Source="$(var.BuildSrcDir)\os\macos\__init__.py" />
+      </Component>
+      <Component Id="c0033_base_py" Directory="d_os_macos_collectors" Guid="{B656AD28-D657-5731-BD50-3D5A8CD8B081}">
+        <File Id="f0033_base_py" Source="$(var.BuildSrcDir)\os\macos\collectors\base.py" />
+      </Component>
+      <Component Id="c0034_inventory_py" Directory="d_os_macos_collectors" Guid="{5C845BFF-442F-8C3D-B50B-6D42176DACD8}">
+        <File Id="f0034_inventory_py" Source="$(var.BuildSrcDir)\os\macos\collectors\inventory.py" />
+      </Component>
+      <Component Id="c0035_network_py" Directory="d_os_macos_collectors" Guid="{64CA8A35-7E90-4D35-8C4F-9E31DCBE4084}">
+        <File Id="f0035_network_py" Source="$(var.BuildSrcDir)\os\macos\collectors\network.py" />
+      </Component>
+      <Component Id="c0036_posture_py" Directory="d_os_macos_collectors" Guid="{62443D68-DAEB-883F-8495-C80943E55D49}">
+        <File Id="f0036_posture_py" Source="$(var.BuildSrcDir)\os\macos\collectors\posture.py" />
+      </Component>
+      <Component Id="c0037_system_py" Directory="d_os_macos_collectors" Guid="{57CD6ACE-FDFA-F933-AC9E-98804CB2BB40}">
+        <File Id="f0037_system_py" Source="$(var.BuildSrcDir)\os\macos\collectors\system.py" />
+      </Component>
+      <Component Id="c0038_volatile_py" Directory="d_os_macos_collectors" Guid="{15563AA1-B92E-143E-BC44-276F9BAC18C3}">
+        <File Id="f0038_volatile_py" Source="$(var.BuildSrcDir)\os\macos\collectors\volatile.py" />
+      </Component>
+      <Component Id="c0039_init___py" Directory="d_os_macos_collectors" Guid="{96B51A78-7454-C03D-8C18-52A6078195E8}">
+        <File Id="f0039_init___py" Source="$(var.BuildSrcDir)\os\macos\collectors\__init__.py" />
+      </Component>
+      <Component Id="c0040_generate_config_sh" Directory="d_os_macos_installer" Guid="{60046BE1-569C-4332-99AE-43ACDF74EE62}">
+        <File Id="f0040_generate_config_sh" Source="$(var.BuildSrcDir)\os\macos\installer\generate_config.sh" />
+      </Component>
+      <Component Id="c0041_install_sh" Directory="d_os_macos_installer" Guid="{292CF677-2596-FA34-A3CE-24188751FB29}">
+        <File Id="f0041_install_sh" Source="$(var.BuildSrcDir)\os\macos\installer\install.sh" />
+      </Component>
+      <Component Id="c0042_uninstall_sh" Directory="d_os_macos_installer" Guid="{2C0396A2-E26A-9236-95F1-93E34CB1BF41}">
+        <File Id="f0042_uninstall_sh" Source="$(var.BuildSrcDir)\os\macos\installer\uninstall.sh" />
+      </Component>
+      <Component Id="c0043_build_pkg_sh" Directory="d_os_macos_pkg" Guid="{FC3BDF61-DDBD-7533-B9C3-4A6446BF1808}">
+        <File Id="f0043_build_pkg_sh" Source="$(var.BuildSrcDir)\os\macos\pkg\build_pkg.sh" />
+      </Component>
+      <Component Id="c0044_entitlements_plist" Directory="d_os_macos_pkg" Guid="{78B7A798-EC2D-2D3C-AB76-2DD96DB80B01}">
+        <File Id="f0044_entitlements_plist" Source="$(var.BuildSrcDir)\os\macos\pkg\entitlements.plist" />
+      </Component>
+      <Component Id="c0045_agent_win_entry_py" Directory="d_os_windows" Guid="{22661211-56FB-D83C-8ADB-F7D769B17904}">
+        <File Id="f0045_agent_win_entry_py" Source="$(var.BuildSrcDir)\os\windows\agent_win_entry.py" />
+      </Component>
+      <Component Id="c0046_keystore_py" Directory="d_os_windows" Guid="{D1354458-36DA-0F36-9CA0-3A515CED84E5}">
+        <File Id="f0046_keystore_py" Source="$(var.BuildSrcDir)\os\windows\keystore.py" />
+      </Component>
+      <Component Id="c0047_normalizer_py" Directory="d_os_windows" Guid="{2C1B69FA-B30C-9C35-ABCB-33CDB829592F}">
+        <File Id="f0047_normalizer_py" Source="$(var.BuildSrcDir)\os\windows\normalizer.py" />
+      </Component>
+      <Component Id="c0048_requirements_txt" Directory="d_os_windows" Guid="{91979B0A-2A86-4E38-BB23-B6B98F33778D}">
+        <File Id="f0048_requirements_txt" Source="$(var.BuildSrcDir)\os\windows\requirements.txt" />
+      </Component>
+      <Component Id="c0049_service_py" Directory="d_os_windows" Guid="{E1CF6886-8E77-DE35-B525-1C715C0A9BF9}">
+        <File Id="f0049_service_py" Source="$(var.BuildSrcDir)\os\windows\service.py" />
+      </Component>
+      <Component Id="c0050_tls_transport_py" Directory="d_os_windows" Guid="{DF58FF2F-8A2D-0D30-B730-73BAA01EB3E4}">
+        <File Id="f0050_tls_transport_py" Source="$(var.BuildSrcDir)\os\windows\tls_transport.py" />
+      </Component>
+      <Component Id="c0051_watchdog_svc_py" Directory="d_os_windows" Guid="{9A6B4583-5B14-033A-B3B8-F8B9A694E062}">
+        <File Id="f0051_watchdog_svc_py" Source="$(var.BuildSrcDir)\os\windows\watchdog_svc.py" />
+      </Component>
+      <Component Id="c0052_win_agent_py" Directory="d_os_windows" Guid="{D1467F30-48D5-FD35-9962-A06B7EAD873D}">
+        <File Id="f0052_win_agent_py" Source="$(var.BuildSrcDir)\os\windows\win_agent.py" />
+      </Component>
+      <Component Id="c0053_init___py" Directory="d_os_windows" Guid="{424348A6-044F-1B34-A027-EFED3FBF178E}">
+        <File Id="f0053_init___py" Source="$(var.BuildSrcDir)\os\windows\__init__.py" />
+      </Component>
+      <Component Id="c0054_base_py" Directory="d_os_windows_collectors" Guid="{865A1483-BA8B-093F-8448-5412FBB287E3}">
+        <File Id="f0054_base_py" Source="$(var.BuildSrcDir)\os\windows\collectors\base.py" />
+      </Component>
+      <Component Id="c0055_eventlog_py" Directory="d_os_windows_collectors" Guid="{429C0A71-D05F-B839-9059-4B480ACC14BD}">
+        <File Id="f0055_eventlog_py" Source="$(var.BuildSrcDir)\os\windows\collectors\eventlog.py" />
+      </Component>
+      <Component Id="c0056_inventory_py" Directory="d_os_windows_collectors" Guid="{4929A911-4D19-7A39-9A85-3B80A6E722C6}">
+        <File Id="f0056_inventory_py" Source="$(var.BuildSrcDir)\os\windows\collectors\inventory.py" />
+      </Component>
+      <Component Id="c0057_network_py" Directory="d_os_windows_collectors" Guid="{2F2657CC-E051-4534-93CA-33BA363A2345}">
+        <File Id="f0057_network_py" Source="$(var.BuildSrcDir)\os\windows\collectors\network.py" />
+      </Component>
+      <Component Id="c0058_posture_py" Directory="d_os_windows_collectors" Guid="{816059DB-D282-2438-B7ED-2BD1C96B4110}">
+        <File Id="f0058_posture_py" Source="$(var.BuildSrcDir)\os\windows\collectors\posture.py" />
+      </Component>
+      <Component Id="c0059_system_py" Directory="d_os_windows_collectors" Guid="{662A5E7D-92B5-1936-91B1-92974554A68E}">
+        <File Id="f0059_system_py" Source="$(var.BuildSrcDir)\os\windows\collectors\system.py" />
+      </Component>
+      <Component Id="c0060_volatile_py" Directory="d_os_windows_collectors" Guid="{1B48FFC2-B73E-8737-98C3-93CC0ABE54A1}">
+        <File Id="f0060_volatile_py" Source="$(var.BuildSrcDir)\os\windows\collectors\volatile.py" />
+      </Component>
+      <Component Id="c0061_init___py" Directory="d_os_windows_collectors" Guid="{1B695C8C-B4A3-7B30-AD0B-FB4F3C948F89}">
+        <File Id="f0061_init___py" Source="$(var.BuildSrcDir)\os\windows\collectors\__init__.py" />
+      </Component>
+      <Component Id="c0062_attacklens_service_cmd" Directory="d_os_windows_installer" Guid="{525191E9-017C-5434-ACA8-002054849E18}">
+        <File Id="f0062_attacklens_service_cmd" Source="$(var.BuildSrcDir)\os\windows\installer\attacklens-service.cmd" />
+      </Component>
+      <Component Id="c0063_attacklens_service_ps1" Directory="d_os_windows_installer" Guid="{61B8AAD1-4D2E-3132-BC3C-782E383DD543}">
+        <File Id="f0063_attacklens_service_ps1" Source="$(var.BuildSrcDir)\os\windows\installer\attacklens-service.ps1" />
+      </Component>
+      <Component Id="c0064_build_msi_ps1" Directory="d_os_windows_installer" Guid="{38FCB74F-4975-D738-8E73-3080BD710824}">
+        <File Id="f0064_build_msi_ps1" Source="$(var.BuildSrcDir)\os\windows\installer\build_msi.ps1" />
+      </Component>
+      <Component Id="c0065_generate_config_ps1" Directory="d_os_windows_installer" Guid="{400FD0BF-42F7-043E-BD2C-692EA49D546D}">
+        <File Id="f0065_generate_config_ps1" Source="$(var.BuildSrcDir)\os\windows\installer\generate_config.ps1" />
+      </Component>
+      <Component Id="c0066_install_ps1" Directory="d_os_windows_installer" Guid="{8F2F4E6E-3A55-0636-BA3E-B6EEA5A9D375}">
+        <File Id="f0066_install_ps1" Source="$(var.BuildSrcDir)\os\windows\installer\install.ps1" />
+      </Component>
+      <Component Id="c0067_product_wxs" Directory="d_os_windows_installer" Guid="{09390293-232F-9C3B-A9A7-C37EE441FB23}">
+        <File Id="f0067_product_wxs" Source="$(var.BuildSrcDir)\os\windows\installer\product.wxs" />
+      </Component>
+      <Component Id="c0068_QUICKSTART_md" Directory="d_os_windows_installer" Guid="{C522CE85-ADC9-8B3E-952A-FC2110C032B5}">
+        <File Id="f0068_QUICKSTART_md" Source="$(var.BuildSrcDir)\os\windows\installer\QUICKSTART.md" />
+      </Component>
+      <Component Id="c0069_setup_services_ps1" Directory="d_os_windows_installer" Guid="{F3974FD2-69B8-9F3C-80DD-5D57DC311A79}">
+        <File Id="f0069_setup_services_ps1" Source="$(var.BuildSrcDir)\os\windows\installer\setup_services.ps1" />
+      </Component>
+      <Component Id="c0070_uninstall_ps1" Directory="d_os_windows_installer" Guid="{B69AF16F-4481-E835-897B-6F8148A40724}">
+        <File Id="f0070_uninstall_ps1" Source="$(var.BuildSrcDir)\os\windows\installer\uninstall.ps1" />
+      </Component>
+      <Component Id="c0071_build_exe_ps1" Directory="d_os_windows_pkg" Guid="{17AD1E31-3486-BB3F-A4CE-08D7E426550F}">
+        <File Id="f0071_build_exe_ps1" Source="$(var.BuildSrcDir)\os\windows\pkg\build_exe.ps1" />
+      </Component>
+      <Component Id="c0072_build_msi_ps1" Directory="d_os_windows_pkg" Guid="{2C70E0AB-74D9-5932-9AD0-5D2A31A00833}">
+        <File Id="f0072_build_msi_ps1" Source="$(var.BuildSrcDir)\os\windows\pkg\build_msi.ps1" />
+      </Component>
+      <Component Id="c0073_generate_config_ps1" Directory="d_os_windows_pkg" Guid="{28FDCFF6-EAE2-6F35-913C-4A4A694744C9}">
+        <File Id="f0073_generate_config_ps1" Source="$(var.BuildSrcDir)\os\windows\pkg\generate_config.ps1" />
+      </Component>
+      <Component Id="c0074_jarvis_agent_spec" Directory="d_os_windows_pkg" Guid="{89597B9E-6C20-A33B-8427-91FEE6802D98}">
+        <File Id="f0074_jarvis_agent_spec" Source="$(var.BuildSrcDir)\os\windows\pkg\jarvis-agent.spec" />
+      </Component>
+      <Component Id="c0075_jarvis_agent_wxs" Directory="d_os_windows_pkg" Guid="{8400123A-478F-3135-9EE4-D456EBE2EAA9}">
+        <File Id="f0075_jarvis_agent_wxs" Source="$(var.BuildSrcDir)\os\windows\pkg\jarvis-agent.wxs" />
+      </Component>
+      <Component Id="c0076_jarvis_watchdog_spec" Directory="d_os_windows_pkg" Guid="{FB624375-AFD6-7B37-ACFE-27F02EEECAD8}">
+        <File Id="f0076_jarvis_watchdog_spec" Source="$(var.BuildSrcDir)\os\windows\pkg\jarvis-watchdog.spec" />
+      </Component>
+      <Component Id="c0077_manage_services_ps1" Directory="d_os_windows_pkg" Guid="{7F43747D-D934-E135-B64E-719340F1DBB8}">
+        <File Id="f0077_manage_services_ps1" Source="$(var.BuildSrcDir)\os\windows\pkg\manage_services.ps1" />
+      </Component>
+      <Component Id="c0078_build_pkg_sh" Directory="d_pkg" Guid="{37883C99-AFF9-CC3A-AED9-311D78073E70}">
+        <File Id="f0078_build_pkg_sh" Source="$(var.BuildSrcDir)\pkg\build_pkg.sh" />
+      </Component>
+      <Component Id="c0079_postinstall" Directory="d_pkg_scripts" Guid="{4C871BD6-887F-FD32-A8B2-04291151EEF8}">
+        <File Id="f0079_postinstall" Source="$(var.BuildSrcDir)\pkg\scripts\postinstall" />
+      </Component>
+      <Component Id="c0080_preinstall" Directory="d_pkg_scripts" Guid="{065CBD32-27F6-323C-B60E-082F7F4A5344}">
+        <File Id="f0080_preinstall" Source="$(var.BuildSrcDir)\pkg\scripts\preinstall" />
+      </Component>
+      <Component Id="c0081_install_sh" Directory="d_scripts" Guid="{A3CFBD92-6ABD-DF3F-803F-ECD520D6AA4C}">
+        <File Id="f0081_install_sh" Source="$(var.BuildSrcDir)\scripts\install.sh" />
+      </Component>
+      <Component Id="c0082_unsent_ndjson" Directory="d_spool" Guid="{16D5BCB4-2BD4-A239-8FEF-E2C1DC57B3FA}">
+        <File Id="f0082_unsent_ndjson" Source="$(var.BuildSrcDir)\spool\unsent.ndjson" />
+      </Component>
+    </ComponentGroup>
+  </Fragment>
+</Wix>

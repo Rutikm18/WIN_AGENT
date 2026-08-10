@@ -31,9 +31,12 @@ def normalize(section: str, raw: Any) -> Any:
 def _metrics(raw: dict) -> dict:
     if not isinstance(raw, dict):
         return raw
+    per_core = raw.get("cpu_per_core")
+    per_core = [_f(c, 0.0) for c in per_core] if isinstance(per_core, list) else []
     return {
         "cpu_pct":       _f(raw.get("cpu_pct"),    0.0),
         "cpu_cores":     _i_opt(raw.get("cpu_cores")),
+        "cpu_per_core":  per_core,
         "mem_pct":       _f(raw.get("mem_pct"),    0.0),
         "mem_used_mb":   _i(raw.get("mem_used_mb"), 0),
         "mem_total_mb":  _i(raw.get("mem_total_mb"), 0),
@@ -59,6 +62,8 @@ def _connections(raw: list) -> list:
             "remote_addr": _s_opt(c.get("remote_addr")),
             "remote_port": _i_opt(c.get("remote_port")),
             "state":       _s_opt(c.get("state")),
+            "direction":   _s_opt(c.get("direction")),
+            "service":     _s_opt(c.get("service")),
             "pid":         _i_opt(c.get("pid")),
             "process":     _s_opt(c.get("process")),
         }
@@ -81,6 +86,7 @@ def _processes(raw: list) -> list:
             "status":     _s_opt(p.get("status")),
             "started_at": _i_opt(p.get("started_at")),
             "cmdline":    _s_opt(p.get("cmdline")),
+            "signed":     _s_opt(p.get("signed")),
         }
         for p in raw if isinstance(p, dict)
     ]
@@ -392,6 +398,117 @@ def _binaries(raw: list) -> list:
     ]
 
 
+def _eventlog(raw: list) -> list:
+    if not isinstance(raw, list):
+        return raw
+    return [
+        {
+            "event_id":  _i(e.get("event_id"), 0),
+            "timestamp": _i_opt(e.get("timestamp")),
+            "computer":  _s_opt(e.get("computer")),
+            "channel":   str(e.get("channel") or ""),
+            "category":  str(e.get("category") or "other"),
+            "subject":   _s_opt(e.get("subject")),
+            "detail":    e.get("detail") if isinstance(e.get("detail"), dict) else {},
+        }
+        for e in raw if isinstance(e, dict) and e.get("event_id")
+    ]
+
+
+def _sca(raw: dict) -> dict:
+    """
+    Security Configuration Assessment result.
+
+    The SCA engine already emits canonical structure; this coerces types and
+    guarantees the top-level shape so a partial/empty scan still validates.
+    """
+    if not isinstance(raw, dict):
+        return {"policies": [], "summary": _sca_summary({})}
+
+    policies = []
+    for pol in raw.get("policies") or []:
+        if not isinstance(pol, dict):
+            continue
+        checks = [
+            {
+                "id":          str(c.get("id") or ""),
+                "title":       str(c.get("title") or ""),
+                "result":      str(c.get("result") or "error"),
+                "severity":    str(c.get("severity") or "medium"),
+                "profile":     c.get("profile"),
+                "scored":      bool(c.get("scored", True)),
+                "rationale":   _s_opt(c.get("rationale")),
+                "remediation": _s_opt(c.get("remediation")),
+                "compliance":  c.get("compliance") if isinstance(c.get("compliance"), dict) else {},
+                "duration_ms": _i(c.get("duration_ms"), 0),
+                "rules":       _sca_rules(c.get("rules")),
+            }
+            for c in (pol.get("checks") or []) if isinstance(c, dict)
+        ]
+        policies.append({
+            "policy_id":   str(pol.get("policy_id") or "policy"),
+            "policy_name": str(pol.get("policy_name") or "policy"),
+            "policy_version": str(pol.get("policy_version") or ""),
+            "benchmark":   _s_opt(pol.get("benchmark")),
+            "profile":     pol.get("profile"),
+            "checks":      checks,
+            "summary":     _sca_summary(pol.get("summary")),
+        })
+
+    return {
+        "schema_version": _i(raw.get("schema_version"), 2),
+        "scan_id": str(raw.get("scan_id") or ""),
+        "generated_at": _i(raw.get("generated_at"), 0),
+        "started_at": _i(raw.get("started_at"), 0),
+        "completed_at": _i(raw.get("completed_at"), 0),
+        "duration_ms": _i(raw.get("duration_ms"), 0),
+        "policies": policies,
+        "summary": _sca_summary(raw.get("summary")),
+        "changes": raw.get("changes") if isinstance(raw.get("changes"), dict) else {},
+        "collector_error": (
+            raw.get("collector_error")
+            if isinstance(raw.get("collector_error"), dict)
+            else None
+        ),
+    }
+
+
+def _sca_summary(s) -> dict:
+    s = s if isinstance(s, dict) else {}
+    return {
+        "total":          _i(s.get("total"), 0),
+        "pass":           _i(s.get("pass"), 0),
+        "fail":           _i(s.get("fail"), 0),
+        "not_applicable": _i(s.get("not_applicable"), 0),
+        "error":          _i(s.get("error"), 0),
+        "unknown":        _i(s.get("unknown"), 0),
+        "scored_checks":  _i(s.get("scored_checks"), 0),
+        "scored_pass":    _i(s.get("scored_pass"), 0),
+        "scored_fail":    _i(s.get("scored_fail"), 0),
+        "score_pct":      _f_opt(s.get("score_pct")),
+        "coverage_pct":   _f_opt(s.get("coverage_pct")),
+        "status":         str(s.get("status") or "unknown"),
+        "policies":       _i(s.get("policies"), 0),
+    }
+
+
+def _sca_rules(rules) -> list:
+    if not isinstance(rules, list):
+        return []
+    return [
+        {
+            "id": str(rule.get("id") or ""),
+            "rule_type": str(rule.get("rule_type") or "unknown"),
+            "result": str(rule.get("result") or "error"),
+            "return_code": _i_opt(rule.get("return_code")),
+            "duration_ms": _i(rule.get("duration_ms"), 0),
+            "evidence": str(rule.get("evidence") or "")[:1040],
+            "applicability": bool(rule.get("applicability", False)),
+        }
+        for rule in rules if isinstance(rule, dict)
+    ]
+
+
 def _sbom(raw: list) -> list:
     if not isinstance(raw, list):
         return raw
@@ -411,6 +528,16 @@ def _sbom(raw: list) -> list:
 
 # ── Dispatch table ────────────────────────────────────────────────────────────
 
+def _security_audit(raw: Any) -> dict:
+    """Keep the nested audit schema intact while rejecting invalid roots."""
+    return raw if isinstance(raw, dict) else {
+        "schema_version": 1,
+        "partial": True,
+        "coverage": {},
+        "findings": [],
+    }
+
+
 _NORMALIZERS: dict[str, Any] = {
     "metrics":     _metrics,     "connections": _connections,
     "processes":   _processes,   "ports":       _ports,
@@ -423,6 +550,8 @@ _NORMALIZERS: dict[str, Any] = {
     "sysctl":      _sysctl,      "configs":     _configs,
     "apps":        _apps,        "packages":    _packages,
     "binaries":    _binaries,    "sbom":        _sbom,
+    "sca":         _sca,         "eventlog":    _eventlog,
+    "security_audit": _security_audit,
 }
 
 

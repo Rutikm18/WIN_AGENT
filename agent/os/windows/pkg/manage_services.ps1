@@ -1,9 +1,9 @@
 <#
 .SYNOPSIS
-    Jarvis Agent service management CLI.
+    AttackLens Agent service management CLI.
 
 .DESCRIPTION
-    Operator tool for managing the JarvisAgent and JarvisWatchdog Windows Services
+    Operator tool for managing the AttackLensAgent and AttackLensWatchdog Windows Services
     installed by the MSI.
 
     Commands
@@ -13,7 +13,8 @@
       stop      - Stop both services (Agent first, then Watchdog)
       restart   - Stop then start both services
       logs      - Tail the agent log (default: last 50 lines)
-      reenroll  - Delete stored API key and restart agent (triggers re-enrollment)
+      enroll    - Delete stored API key and restart agent (triggers re-enrollment)
+      reenroll  - Alias for enroll
       config    - Open agent.toml in the default editor
       harden    - Move services from LocalSystem to NetworkService + Event Log Readers
       version   - Show installed version from registry
@@ -21,7 +22,7 @@
     Must be run as Administrator.
 
 .PARAMETER Command
-    One of: status, start, stop, restart, logs, reenroll, config, harden, version
+    One of: status, start, stop, restart, logs, enroll, reenroll, config, harden, version
 
 .PARAMETER LogLines
     Number of log lines to show with the 'logs' command. Default: 50
@@ -52,7 +53,7 @@
 
 param(
     [Parameter(Position=0)]
-    [ValidateSet("status","start","stop","restart","logs","reenroll","config","harden","version","help")]
+    [ValidateSet("status","start","stop","restart","logs","enroll","reenroll","config","harden","version","help")]
     [string] $Command = "status",
 
     [int]    $LogLines = 50,
@@ -63,9 +64,9 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 # ── Constants ──────────────────────────────────────────────────────────────────
-$AGENT_SVC    = "JarvisAgent"
-$WATCHDOG_SVC = "JarvisWatchdog"
-$REG_KEY      = "HKLM:\SOFTWARE\Jarvis\Agent"
+$AGENT_SVC    = "AttackLensAgent"
+$WATCHDOG_SVC = "AttackLensWatchdog"
+$REG_KEY      = "HKLM:\SOFTWARE\AttackLens\Agent"
 
 # ── Privilege check ────────────────────────────────────────────────────────────
 $currentPrincipal = [Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()
@@ -74,20 +75,20 @@ if (-not $currentPrincipal.IsInRole([Security.Principal.WindowsBuiltInRole]::Adm
 }
 
 # ── Registry helpers ───────────────────────────────────────────────────────────
-function Get-JarvisRegValue([string]$Name) {
+function Get-AttackLensRegValue([string]$Name) {
     try { return (Get-ItemProperty -Path $REG_KEY -Name $Name -ErrorAction Stop).$Name }
     catch { return $null }
 }
 
-$InstallDir  = Get-JarvisRegValue "InstallDir"
-$DataDir     = Get-JarvisRegValue "DataDir"
-$ConfigFile  = Get-JarvisRegValue "ConfigFile"
-$BinDir      = Get-JarvisRegValue "BinDir"
+$InstallDir  = Get-AttackLensRegValue "InstallDir"
+$DataDir     = Get-AttackLensRegValue "DataDir"
+$ConfigFile  = Get-AttackLensRegValue "ConfigFile"
+$BinDir      = Get-AttackLensRegValue "BinDir"
 
 # Fallback to environment defaults if registry keys are absent
-if (-not $DataDir)    { $DataDir   = Join-Path $env:PROGRAMDATA "Jarvis" }
+if (-not $DataDir)    { $DataDir   = Join-Path $env:PROGRAMDATA "AttackLens" }
 if (-not $ConfigFile) { $ConfigFile= Join-Path $DataDir "config\agent.toml" }
-if (-not $BinDir)     { $BinDir    = Join-Path $env:ProgramFiles "Jarvis\bin" }
+if (-not $BinDir)     { $BinDir    = Join-Path $env:ProgramFiles "AttackLens\bin" }
 
 $LogFile     = Join-Path $DataDir "logs\agent.log"
 $SecurityDir = Join-Path $DataDir "security"
@@ -124,7 +125,7 @@ switch ($Command) {
 
     # ── status ────────────────────────────────────────────────────────────────
     "status" {
-        hdr "Jarvis Agent - Service Status"
+        hdr "AttackLens Agent - Service Status"
 
         foreach ($svc in @($AGENT_SVC, $WATCHDOG_SVC)) {
             $st = Get-SvcStatus $svc
@@ -142,7 +143,7 @@ switch ($Command) {
         Write-Host "  Data dir     : $DataDir"
         Write-Host "  Log file     : $LogFile"
         Write-Host "  Security dir : $SecurityDir"
-        Write-Host "  Version      : $(Get-JarvisRegValue 'Version')"
+        Write-Host "  Version      : $(Get-AttackLensRegValue 'Version')"
 
         if (Test-Path $ConfigFile) {
             hdr "Manager URL (from config)"
@@ -181,7 +182,7 @@ switch ($Command) {
 
     # ── start ─────────────────────────────────────────────────────────────────
     "start" {
-        hdr "Starting Jarvis services"
+        hdr "Starting AttackLens services"
 
         # Start Watchdog first so it's ready to monitor Agent from boot
         $wdSt = Get-SvcStatus $WATCHDOG_SVC
@@ -212,7 +213,7 @@ switch ($Command) {
 
     # ── stop ──────────────────────────────────────────────────────────────────
     "stop" {
-        hdr "Stopping Jarvis services"
+        hdr "Stopping AttackLens services"
 
         # Stop Agent first, then Watchdog (so Watchdog doesn't try to restart Agent)
         foreach ($svc in @($AGENT_SVC, $WATCHDOG_SVC)) {
@@ -233,7 +234,7 @@ switch ($Command) {
 
     # ── restart ───────────────────────────────────────────────────────────────
     "restart" {
-        hdr "Restarting Jarvis services"
+        hdr "Restarting AttackLens services"
         & $MyInvocation.MyCommand.Path stop  -Force:$Force
         Start-Sleep -Seconds 2
         & $MyInvocation.MyCommand.Path start -Force:$Force
@@ -254,7 +255,7 @@ switch ($Command) {
     }
 
     # ── reenroll ──────────────────────────────────────────────────────────────
-    "reenroll" {
+    { $_ -in @("enroll", "reenroll") } {
         hdr "Re-enrollment - deletes client.key so agent auto-re-enrolls on next start"
         if (-not $Force) {
             $confirm = Read-Host "  This deletes security\client.key and triggers automatic re-enrollment. Continue? [y/N]"
@@ -319,8 +320,8 @@ switch ($Command) {
 
     # ── harden ────────────────────────────────────────────────────────────────
     "harden" {
-        hdr "Hardening: move services from LocalSystem to NetworkService"
-        Write-Host "  This restricts privileges while retaining Event Log read access."
+        hdr "Hardening: move agent from LocalSystem to NetworkService"
+        Write-Host "  The watchdog remains LocalSystem so it can control the agent service."
         if (-not $Force) {
             $confirm = Read-Host "  Continue? [y/N]"
             if ($confirm -notmatch '^[yY]') { Write-Host "  Cancelled."; exit 0 }
@@ -343,16 +344,42 @@ switch ($Command) {
             exit 1
         }
 
-        # Reconfigure both services to run as NetworkService
-        foreach ($svc in @($AGENT_SVC, $WATCHDOG_SVC)) {
-            if ((Get-SvcStatus $svc) -eq "NotInstalled") {
-                warn "$svc not installed - skipping"
-                continue
+        # Grant the new identity access before changing the account. Without
+        # this ordering NetworkService cannot read agent.toml to repair ACLs.
+        foreach ($dir in @(
+            $DataDir,
+            (Join-Path $DataDir "security"),
+            (Join-Path $DataDir "spool"),
+            (Join-Path $DataDir "data"),
+            (Join-Path $DataDir "logs")
+        )) {
+            if (Test-Path -LiteralPath $dir) {
+                & icacls.exe $dir /grant:r '*S-1-5-20:(OI)(CI)(M)' /T /C | Out-Null
+                if ($LASTEXITCODE -ne 0) {
+                    err "Could not grant NetworkService access to $dir"
+                    exit 1
+                }
             }
-            Write-Host "  Configuring $svc to run as NT AUTHORITY\NetworkService..." -NoNewline
-            & sc.exe config $svc obj= "NT AUTHORITY\NetworkService" password= "" | Out-Null
+        }
+        if (Test-Path -LiteralPath $ConfigFile) {
+            & icacls.exe $ConfigFile /grant:r '*S-1-5-20:(R)' /C | Out-Null
+            if ($LASTEXITCODE -ne 0) {
+                err "Could not grant NetworkService read access to agent.toml"
+                exit 1
+            }
+        }
+
+        if ((Get-SvcStatus $AGENT_SVC) -ne "NotInstalled") {
+            Write-Host "  Configuring $AGENT_SVC as NetworkService..." -NoNewline
+            & sc.exe config $AGENT_SVC obj= "NT AUTHORITY\NetworkService" password= "" | Out-Null
             if ($LASTEXITCODE -eq 0) { ok "done" }
-            else { err "sc.exe failed for $svc (exit $LASTEXITCODE)" }
+            else { err "sc.exe failed for $AGENT_SVC (exit $LASTEXITCODE)"; exit 1 }
+        }
+        if ((Get-SvcStatus $WATCHDOG_SVC) -ne "NotInstalled") {
+            Write-Host "  Keeping $WATCHDOG_SVC as LocalSystem..." -NoNewline
+            & sc.exe config $WATCHDOG_SVC obj= "LocalSystem" password= "" | Out-Null
+            if ($LASTEXITCODE -eq 0) { ok "done" }
+            else { err "sc.exe failed for $WATCHDOG_SVC (exit $LASTEXITCODE)"; exit 1 }
         }
 
         Write-Host ""
@@ -363,15 +390,15 @@ switch ($Command) {
 
     # ── version ───────────────────────────────────────────────────────────────
     "version" {
-        $ver = Get-JarvisRegValue "Version"
+        $ver = Get-AttackLensRegValue "Version"
         if ($ver) {
             Write-Host ""
-            Write-Host "  Jarvis Agent version: $ver" -ForegroundColor Cyan
+            Write-Host "  AttackLens Agent version: $ver" -ForegroundColor Cyan
             Write-Host "  Install dir:          $InstallDir"
             Write-Host "  Data dir:             $DataDir"
             Write-Host ""
         } else {
-            warn "Version not found in registry - is Jarvis Agent installed?"
+            warn "Version not found in registry - is AttackLens Agent installed?"
         }
     }
 

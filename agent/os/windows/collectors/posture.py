@@ -23,7 +23,6 @@ import json
 import logging
 import os
 import re
-import stat
 
 from .base import WinBaseCollector
 

@@ -1,0 +1,35 @@
+#!/bin/bash
+# =============================================================================
+#  agent/pkg/scripts/preinstall
+#  Runs BEFORE files are installed. Gracefully stops any running service.
+# =============================================================================
+set -euo pipefail
+
+LAUNCHDAEMON="/Library/LaunchDaemons/com.macintel.agent.plist"
+AGENT_BIN="/opt/macintel/bin/macintel-agent"
+WATCHDOG_BIN="/opt/macintel/bin/macintel-watchdog"
+
+echo "[mac_intel preinstall] Stopping existing service (if running)..."
+
+# Stop LaunchDaemon (stops watchdog → agent cascade)
+if /bin/launchctl list "com.macintel.agent" &>/dev/null; then
+    /bin/launchctl unload "${LAUNCHDAEMON}" 2>/dev/null || true
+    echo "[mac_intel preinstall] Service unloaded."
+fi
+
+# Belt-and-suspenders: kill any stray processes
+for BIN in "${AGENT_BIN}" "${WATCHDOG_BIN}"; do
+    PIDS=$(pgrep -x "$(basename "${BIN}")" 2>/dev/null || true)
+    if [ -n "${PIDS}" ]; then
+        echo "[mac_intel preinstall] Killing stray $(basename "${BIN}") PIDs: ${PIDS}"
+        kill -TERM ${PIDS} 2>/dev/null || true
+        sleep 1
+        kill -KILL ${PIDS} 2>/dev/null || true
+    fi
+done
+
+# Remove stale PID file
+[ -f /var/run/macintel-agent.pid ] && rm -f /var/run/macintel-agent.pid
+
+echo "[mac_intel preinstall] Pre-install complete."
+exit 0

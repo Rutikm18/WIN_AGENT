@@ -1,0 +1,115 @@
+#!/bin/bash
+# =============================================================================
+#  agent/pkg/scripts/postinstall
+#  Runs AFTER files are installed.
+#  - Creates required directories with correct permissions
+#  - Sets binary ownership and mode
+#  - Creates default config if not present
+#  - Loads the LaunchDaemon
+# =============================================================================
+set -euo pipefail
+
+INSTALL_DIR="/opt/macintel"
+CONFIG_DIR="/Library/Application Support/MacIntel"
+SECURITY_DIR="${CONFIG_DIR}/security"
+LOG_DIR="/Library/Logs/MacIntel"
+LAUNCHDAEMON="/Library/LaunchDaemons/com.macintel.agent.plist"
+
+echo "[mac_intel postinstall] Setting up directories and permissions..."
+
+# ── Directories ───────────────────────────────────────────────────────────────
+install -d -m 755 -o root -g wheel "${INSTALL_DIR}/bin"
+install -d -m 755 -o root -g wheel "${CONFIG_DIR}"
+install -d -m 700 -o root -g wheel "${SECURITY_DIR}"   # 700: only root can enter
+install -d -m 755 -o root -g wheel "${LOG_DIR}"
+install -d -m 755 -o root -g wheel "/var/run"
+
+# ── Binary permissions ────────────────────────────────────────────────────────
+chown root:wheel "${INSTALL_DIR}/bin/macintel-agent"
+chown root:wheel "${INSTALL_DIR}/bin/macintel-watchdog"
+chmod 755 "${INSTALL_DIR}/bin/macintel-agent"
+chmod 755 "${INSTALL_DIR}/bin/macintel-watchdog"
+
+# Ensure binaries are not world-writable
+chmod o-w "${INSTALL_DIR}/bin/macintel-agent"
+chmod o-w "${INSTALL_DIR}/bin/macintel-watchdog"
+
+# ── Default config ────────────────────────────────────────────────────────────
+if [ ! -f "${CONFIG_DIR}/agent.conf" ]; then
+    if [ -f "${CONFIG_DIR}/agent.conf.example" ]; then
+        cp "${CONFIG_DIR}/agent.conf.example" "${CONFIG_DIR}/agent.conf"
+    else
+        # Minimal fallback config
+        cat > "${CONFIG_DIR}/agent.conf" << 'EOF'
+[agent]
+id   = "agent-001"
+name = "mac_intel Agent"
+
+[manager]
+url        = "https://YOUR_MANAGER_IP:8443"
+tls_verify = false
+
+[enrollment]
+token    = ""        # Set this to the enrollment token from your manager operator
+keystore = "keychain"
+
+[paths]
+install_dir  = "/opt/macintel"
+config_dir   = "/Library/Application Support/MacIntel"
+log_dir      = "/Library/Logs/MacIntel"
+security_dir = "/Library/Application Support/MacIntel/security"
+pid_file     = "/var/run/macintel-agent.pid"
+
+[binaries]
+agent    = "/opt/macintel/bin/macintel-agent"
+watchdog = "/opt/macintel/bin/macintel-watchdog"
+
+[watchdog]
+enabled             = true
+check_interval_sec  = 30
+max_restarts        = 5
+restart_window_sec  = 300
+
+[logging]
+level   = "INFO"
+file    = "/Library/Logs/MacIntel/agent.log"
+max_mb  = 50
+backups = 5
+EOF
+    fi
+    chown root:wheel "${CONFIG_DIR}/agent.conf"
+    chmod 640 "${CONFIG_DIR}/agent.conf"   # root rw, wheel r, others none
+    echo "[mac_intel postinstall] Default config created: ${CONFIG_DIR}/agent.conf"
+else
+    echo "[mac_intel postinstall] Existing config preserved: ${CONFIG_DIR}/agent.conf"
+fi
+
+# ── LaunchDaemon ──────────────────────────────────────────────────────────────
+chown root:wheel "${LAUNCHDAEMON}"
+chmod 644 "${LAUNCHDAEMON}"
+
+if [ -f "${LAUNCHDAEMON}" ]; then
+    /bin/launchctl load -w "${LAUNCHDAEMON}" 2>/dev/null || \
+    /bin/launchctl bootstrap system "${LAUNCHDAEMON}" 2>/dev/null || true
+    echo "[mac_intel postinstall] LaunchDaemon loaded: com.macintel.agent"
+fi
+
+echo ""
+echo "======================================================================"
+echo " mac_intel Agent installed successfully!"
+echo "======================================================================"
+echo ""
+echo " REQUIRED: Edit the config before the agent can run:"
+echo "   sudo nano '${CONFIG_DIR}/agent.conf'"
+echo ""
+echo "   Set [manager] url = https://YOUR_MANAGER_IP:8443"
+echo "   Set [enrollment] token = <token from your manager operator>"
+echo ""
+echo " Then start the agent:"
+echo "   sudo launchctl kickstart system/com.macintel.agent"
+echo ""
+echo " Check logs:"
+echo "   tail -f ${LOG_DIR}/agent.log"
+echo "   tail -f ${LOG_DIR}/watchdog.log"
+echo "======================================================================"
+exit 0

@@ -1,0 +1,160 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- AttackLens interactive MSI pages. All values are normal MSI properties. -->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
+  <Fragment>
+    <UI Id="AttackLensUI">
+      <ui:WixUI Id="WixUI_InstallDir" InstallDirectory="INSTALLDIR" />
+
+      <Dialog Id="AttackLensManagerDlg" Width="370" Height="270"
+              Title="[ProductName] - Manager connection">
+        <Control Id="Title" Type="Text" X="15" Y="10" Width="340" Height="20"
+                 Text="Manager connection" />
+        <Control Id="Description" Type="Text" X="20" Y="35" Width="330" Height="28"
+                 Text="Enter one manager address: an IP, DNS name, or full HTTP(S) URL. IP/name entries use HTTP and port 8080 by default." />
+        <Control Id="ManagerUrlLabel" Type="Text" X="20" Y="75" Width="100" Height="15"
+                 Text="Manager address:" />
+        <Control Id="ManagerUrl" Type="Edit" X="125" Y="72" Width="220" Height="18"
+                 Property="MANAGER_URL" />
+        <Control Id="ManagerPortLabel" Type="Text" X="20" Y="101" Width="100" Height="15"
+                 Text="Port:" />
+        <Control Id="ManagerPort" Type="Edit" X="125" Y="98" Width="55" Height="18"
+                 Property="MANAGER_PORT" />
+        <Control Id="TlsPolicy" Type="RadioButtonGroup" X="20" Y="124"
+                 Width="325" Height="36" Property="TLS_VERIFY">
+          <RadioButtonGroup Property="TLS_VERIFY">
+            <RadioButton Value="true" X="0" Y="0" Width="325" Height="16"
+                         Text="Verify the manager TLS certificate (for HTTPS)" />
+            <RadioButton Value="false" X="0" Y="18" Width="325" Height="16"
+                         Text="HTTP/self-signed deployment compatibility" />
+          </RadioButtonGroup>
+        </Control>
+        <Control Id="CaBundleLabel" Type="Text" X="20" Y="165" Width="100" Height="15"
+                 Text="CA bundle (optional):" />
+        <Control Id="CaBundle" Type="Edit" X="125" Y="162" Width="220" Height="18"
+                 Property="CA_BUNDLE" />
+        <Control Id="SpkiLabel" Type="Text" X="20" Y="189" Width="100" Height="15"
+                 Text="SPKI pin (optional):" />
+        <Control Id="SpkiPin" Type="Edit" X="125" Y="186" Width="220" Height="18"
+                 Property="SPKI_PIN" />
+        <Control Id="AllowHttp" Type="CheckBox" X="20" Y="209" Width="325" Height="18"
+                 Property="ALLOW_INSECURE_TRANSPORT" CheckBoxValue="true"
+                 Text="Allow plain HTTP transport (default port 8080)" />
+        <Control Id="Back" Type="PushButton" X="180" Y="235" Width="56" Height="17"
+                 Text="Back">
+          <Publish Event="NewDialog" Value="InstallDirDlg" Condition="1" />
+        </Control>
+        <Control Id="Next" Type="PushButton" X="236" Y="235" Width="56" Height="17"
+                 Default="yes" Text="Next" DisableCondition="NOT MANAGER_URL">
+          <Publish Event="NewDialog" Value="AttackLensEnrollmentDlg"
+                   Condition="MANAGER_URL" />
+        </Control>
+        <Control Id="Cancel" Type="PushButton" X="304" Y="235" Width="56" Height="17"
+                 Cancel="yes" Text="Cancel">
+          <Publish Event="SpawnDialog" Value="CancelDlg" Condition="1" />
+        </Control>
+      </Dialog>
+
+      <Dialog Id="AttackLensEnrollmentDlg" Width="370" Height="270"
+              Title="[ProductName] - Enrollment">
+        <Control Id="Title" Type="Text" X="15" Y="10" Width="340" Height="20"
+                 Text="Enrollment" />
+        <Control Id="Description" Type="Text" X="20" Y="35" Width="330" Height="28"
+                 Text="Provide an enrollment token if your manager requires one. The token is stored only in the protected configuration." />
+        <Control Id="TokenLabel" Type="Text" X="20" Y="82" Width="100" Height="15"
+                 Text="Enrollment token:" />
+        <Control Id="Token" Type="Edit" Password="yes" X="125" Y="79" Width="220" Height="18"
+                 Property="ENROLL_TOKEN" />
+        <Control Id="NameLabel" Type="Text" X="20" Y="116" Width="100" Height="15"
+                 Text="Agent name:" />
+        <Control Id="AgentName" Type="Edit" X="125" Y="113" Width="220" Height="18"
+                 Property="AGENT_NAME" />
+        <Control Id="Back" Type="PushButton" X="180" Y="235" Width="56" Height="17"
+                 Text="Back">
+          <Publish Event="NewDialog" Value="AttackLensManagerDlg" Condition="1" />
+        </Control>
+        <Control Id="Next" Type="PushButton" X="236" Y="235" Width="56" Height="17"
+                 Default="yes" Text="Next">
+          <Publish Event="NewDialog" Value="AttackLensProfileDlg" Condition="1" />
+        </Control>
+        <Control Id="Cancel" Type="PushButton" X="304" Y="235" Width="56" Height="17"
+                 Cancel="yes" Text="Cancel">
+          <Publish Event="SpawnDialog" Value="CancelDlg" Condition="1" />
+        </Control>
+      </Dialog>
+
+      <Dialog Id="AttackLensProfileDlg" Width="370" Height="270"
+              Title="[ProductName] - Collection profile">
+        <Control Id="Title" Type="Text" X="15" Y="10" Width="340" Height="20"
+                 Text="Collection profile" />
+        <Control Id="Description" Type="Text" X="20" Y="35" Width="330" Height="28"
+                 Text="Choose the collection level for this endpoint. Standard is recommended for normal deployment." />
+        <Control Id="ProfileLabel" Type="Text" X="20" Y="86" Width="100" Height="15"
+                 Text="Profile:" />
+        <Control Id="Profile" Type="ComboBox" X="125" Y="83" Width="160" Height="30"
+                 Property="COLLECTION_PROFILE" Sorted="no">
+          <ComboBox Property="COLLECTION_PROFILE">
+            <ListItem Text="Baseline" Value="baseline" />
+            <ListItem Text="Standard (recommended)" Value="standard" />
+            <ListItem Text="Intensive" Value="intensive" />
+            <ListItem Text="Incident" Value="incident" />
+          </ComboBox>
+        </Control>
+        <Control Id="Back" Type="PushButton" X="180" Y="235" Width="56" Height="17"
+                 Text="Back">
+          <Publish Event="NewDialog" Value="AttackLensEnrollmentDlg" Condition="1" />
+        </Control>
+        <Control Id="Next" Type="PushButton" X="236" Y="235" Width="56" Height="17"
+                 Default="yes" Text="Next">
+          <Publish Event="NewDialog" Value="AttackLensSecurityDlg" Condition="1" />
+        </Control>
+        <Control Id="Cancel" Type="PushButton" X="304" Y="235" Width="56" Height="17"
+                 Cancel="yes" Text="Cancel">
+          <Publish Event="SpawnDialog" Value="CancelDlg" Condition="1" />
+        </Control>
+      </Dialog>
+
+      <Dialog Id="AttackLensSecurityDlg" Width="370" Height="270"
+              Title="[ProductName] - Security options">
+        <Control Id="Title" Type="Text" X="15" Y="10" Width="340" Height="20"
+                 Text="Security options" />
+        <Control Id="Description" Type="Text" X="20" Y="35" Width="330" Height="30"
+                 Text="State is preserved by default so upgrades and repairs do not destroy identity or operator settings." />
+        <Control Id="StatePolicy" Type="RadioButtonGroup" X="20" Y="82"
+                 Width="330" Height="44" Property="PRESERVE_STATE">
+          <RadioButtonGroup Property="PRESERVE_STATE">
+            <RadioButton Value="1" X="0" Y="0" Width="330" Height="16"
+                         Text="Preserve configuration and identity (recommended)" />
+            <RadioButton Value="0" X="0" Y="21" Width="330" Height="16"
+                         Text="Regenerate configuration during install or repair" />
+          </RadioButtonGroup>
+        </Control>
+        <Control Id="Purge" Type="CheckBox" X="20" Y="132" Width="325" Height="18"
+                 Property="PURGE_ON_UNINSTALL" CheckBoxValue="1"
+                 Text="Enable purge when uninstall is explicitly requested" />
+        <Control Id="Warning" Type="Text" X="20" Y="163" Width="325" Height="30"
+                 Text="Purge is irreversible and should be enabled only for decommissioning." />
+        <Control Id="Back" Type="PushButton" X="180" Y="235" Width="56" Height="17"
+                 Text="Back">
+          <Publish Event="NewDialog" Value="AttackLensProfileDlg" Condition="1" />
+        </Control>
+        <Control Id="Next" Type="PushButton" X="236" Y="235" Width="56" Height="17"
+                 Default="yes" Text="Next">
+          <Publish Event="NewDialog" Value="VerifyReadyDlg" Condition="1" />
+        </Control>
+        <Control Id="Cancel" Type="PushButton" X="304" Y="235" Width="56" Height="17"
+                 Cancel="yes" Text="Cancel">
+          <Publish Event="SpawnDialog" Value="CancelDlg" Condition="1" />
+        </Control>
+      </Dialog>
+
+      <!-- Insert the AttackLens pages after the standard install-directory page. -->
+      <Publish Dialog="InstallDirDlg" Control="Next" Event="NewDialog"
+               Value="AttackLensManagerDlg" Order="5"
+               Condition="NOT Installed" />
+      <Publish Dialog="VerifyReadyDlg" Control="Back" Event="NewDialog"
+               Value="AttackLensSecurityDlg" Order="5"
+               Condition="NOT Installed" />
+    </UI>
+  </Fragment>
+</Wix>

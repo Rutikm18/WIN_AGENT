@@ -20,3 +20,9 @@ psutil>=5.9.8
 # explicitly here because we depend on HTTPAdapter internals for SPKI pinning.
 requests>=2.31.0
 urllib3>=2.0.0
+
+# OPTIONAL — only needed to load YAML Security Configuration Assessment (SCA)
+# drop-in policies from C:\ProgramData\AttackLens\sca\. The bundled CIS baseline
+# is a Python module and requires no parser; JSON drop-ins use the stdlib. Omit
+# this and YAML drop-ins are simply skipped (logged), everything else still works.
+PyYAML>=6.0

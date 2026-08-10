@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+    "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  entitlements.plist — Hardened Runtime entitlements for mac_intel Agent.
+
+  Used during codesign in build_pkg.sh:
+    codesign --options runtime --entitlements entitlements.plist ...
+
+  Hardened Runtime (required for notarisation) restricts what the binary
+  can do. We add back only the capabilities the agent actually needs.
+-->
+<plist version="1.0">
+<dict>
+    <!--
+      Allow execution of other processes (subprocess calls to system tools:
+      ps, lsof, netstat, sysctl, launchctl, system_profiler, etc.)
+    -->
+    <key>com.apple.security.cs.allow-jit</key>
+    <false/>
+
+    <!-- Allow reading all files (needed for /etc, /Library, process lists) -->
+    <key>com.apple.security.files.all</key>
+    <false/>
+
+    <!-- Allow outbound network connections (HTTPS to manager) -->
+    <key>com.apple.security.network.client</key>
+    <true/>
+
+    <!-- Disable library validation so PyInstaller bundles load correctly -->
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <true/>
+
+    <!-- Allow loading of unsigned code pages (PyInstaller uses this) -->
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+    <false/>
+</dict>
+</plist>

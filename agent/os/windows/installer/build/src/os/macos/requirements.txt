@@ -1,0 +1,11 @@
+# agent/os/macos/requirements.txt — macOS-specific agent dependencies
+# Install alongside the base agent requirements:
+#   pip install -r agent/requirements.txt
+#   pip install -r agent/os/macos/requirements.txt
+
+# Keychain access (macOS Keychain Services backend)
+# After install the keyring library automatically uses the macOS Security framework.
+keyring>=24.0.0
+
+# System metrics — psutil macOS backend (ARM64 native wheel via pip)
+psutil>=5.9.8

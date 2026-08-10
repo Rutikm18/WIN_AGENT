@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Generate agent.toml for the Jarvis Windows Agent.
+    Generate agent.toml for the AttackLens Windows Agent.
 
 .DESCRIPTION
     Writes a complete, production-ready agent.toml to:
@@ -18,10 +18,10 @@
       Data     : $DataDir\data\
 
 .PARAMETER InstallDir
-    Root for binaries. Default: C:\Program Files\Jarvis
+    Root for binaries. Default: C:\Program Files\AttackLens
 
 .PARAMETER DataDir
-    Root for data/config/logs. Default: C:\ProgramData\Jarvis
+    Root for data/config/logs. Default: C:\ProgramData\AttackLens
 
 .PARAMETER ManagerUrl
     Manager HTTPS endpoint. Required (e.g. https://manager.corp.example:443).
@@ -71,15 +71,16 @@
 #>
 
 param(
-    [string] $InstallDir    = "C:\Program Files\Jarvis",
+    [string] $InstallDir    = "C:\Program Files\AttackLens",
     [string] $DataDir       = "",
-    [string] $ManagerUrl    = "https://localhost:8443",
+    [string] $ManagerUrl    = "",
     [string] $EnrollToken   = "",
     [string] $ManagerApiKey = "",
     [string] $SpkiPin       = "",
     [string] $AgentId       = "",
     [string] $AgentName     = "",
-    [string] $TlsVerify     = "true"
+    [string] $TlsVerify     = "true",
+    [string] $AllowInsecureTransport = "false"
 )
 
 Set-StrictMode -Version Latest
@@ -87,7 +88,7 @@ $ErrorActionPreference = "Stop"
 
 # ── Resolve data directory ─────────────────────────────────────────────────────
 if (-not $DataDir) {
-    $DataDir = Join-Path $env:PROGRAMDATA "Jarvis"
+    $DataDir = Join-Path $env:PROGRAMDATA "AttackLens"
 }
 
 # ── Derived paths ──────────────────────────────────────────────────────────────
@@ -98,8 +99,8 @@ $SecurityDir = Join-Path $DataDir "security"
 $SpoolDir    = Join-Path $DataDir "spool"
 $SubDataDir  = Join-Path $DataDir "data"
 $ConfigPath  = Join-Path $ConfigDir "agent.toml"
-$AgentExe    = Join-Path $BinDir "jarvis-agent.exe"
-$WatchdogExe = Join-Path $BinDir "jarvis-watchdog.exe"
+$AgentExe    = Join-Path $BinDir "attacklens-agent.exe"
+$WatchdogExe = Join-Path $BinDir "attacklens-watchdog.exe"
 $LogFile     = Join-Path $LogDir "agent.log"
 
 # ── Resolve agent identity ─────────────────────────────────────────────────────
@@ -121,6 +122,16 @@ if (-not $AgentName) {
 if (-not $ManagerUrl) {
     Write-Error "ManagerUrl is required."
 }
+if ($AllowInsecureTransport -notmatch '^(?i:true|false|0|1)$') {
+    Write-Error "AllowInsecureTransport must be 0, 1, true, or false."
+}
+$allowHttp = $AllowInsecureTransport -match '^(?i:true|1)$'
+if ($ManagerUrl -notmatch '^(?i:https?)://') {
+    Write-Error "ManagerUrl must use https:// (or http:// with AllowInsecureTransport=true)."
+}
+if ($ManagerUrl -match '^(?i:http)://' -and -not $allowHttp) {
+    Write-Error "HTTP ManagerUrl requires -AllowInsecureTransport true."
+}
 if ($EnrollToken -and $ManagerApiKey) {
     Write-Warning "Both EnrollToken and ManagerApiKey provided - EnrollToken takes precedence."
     $ManagerApiKey = ""
@@ -136,9 +147,12 @@ foreach ($dir in @($BinDir, $ConfigDir, $LogDir, $SecurityDir, $SpoolDir, $SubDa
 
 # Restrict security dir ACL: SYSTEM + Administrators only
 try {
+    # Keep these SIDs aligned with os/windows/acl.py secure_dir policy.
     & icacls $SecurityDir /inheritance:r `
-        /grant:r "NT AUTHORITY\SYSTEM:(OI)(CI)F" `
-        /grant:r "BUILTIN\Administrators:(OI)(CI)F" | Out-Null
+        /remove:g "*S-1-1-0" /remove:g "*S-1-5-11" /remove:g "*S-1-5-32-545" `
+        /grant:r "*S-1-5-18:(OI)(CI)(F)" `
+        /grant:r "*S-1-5-32-544:(OI)(CI)(F)" | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "icacls failed while protecting $SecurityDir (exit $LASTEXITCODE)" }
     Write-Verbose "Security dir ACL restricted: $SecurityDir"
 } catch {
     Write-Warning "Could not restrict security dir ACL: $_"
@@ -162,10 +176,10 @@ $tlsToml = switch ($tlsLc) {
 $lines = [System.Collections.Generic.List[string]]::new()
 
 $lines.AddRange([string[]]@(
-    "# Jarvis Windows Agent - Configuration",
+    "# AttackLens Windows Agent - Configuration",
     "# Generated: $ts by generate_config.ps1",
-    "# Restart the JarvisAgent Windows Service to apply changes.",
-    "# Full schema: https://github.com/your-org/jarvis/blob/main/docs/agent-config.md",
+    "# Restart the AttackLensAgent Windows Service to apply changes.",
+    "# Full schema: https://github.com/your-org/attacklens/blob/main/docs/agent-config.md",
     ""
 ))
 
@@ -182,6 +196,7 @@ $lines.AddRange([string[]]@(
     "[manager]",
     "url        = `"$ManagerUrl`"",
     "tls_verify = $tlsToml",
+    "allow_insecure_transport = $($allowHttp.ToString().ToLowerInvariant())",
     "timeout_sec = 30"
 ))
 
@@ -199,18 +214,30 @@ if ($SpkiPin) {
 $lines.Add("")
 
 # ── [enrollment] ──────────────────────────────────────────────────────────────
-# token is intentionally empty: the agent auto-enrolls on first start and
-# writes security\client.key containing agent_name, agent_number, and token.
-# To re-enroll: delete security\client.key and restart JarvisAgent.
+# token may be empty when the manager allows open enrollment. On first start
+# the manager returns an API key and the agent writes the protected client key.
+# To re-enroll: delete security\client.key and restart AttackLensAgent.
 $lines.AddRange([string[]]@(
     "[enrollment]",
-    "# token is auto-generated - see security\client.key after first run",
+    "# optional when the manager allows open enrollment",
     "token    = `"$EnrollToken`"",
     "keystore = `"dpapi`"",
     ""
 ))
 
 # ── [paths] ───────────────────────────────────────────────────────────────────
+$autoReenroll = if ($EnrollToken) { "true" } else { "false" }
+$lines.AddRange([string[]]@(
+    "[transport]",
+    "initial_backoff_sec = 5",
+    "max_backoff_sec = 300",
+    "auth_failure_threshold = 3",
+    "auto_reenroll = $autoReenroll",
+    "min_free_mb = 128",
+    "outbox_busy_timeout_ms = 5000",
+    ""
+))
+
 $lines.AddRange([string[]]@(
     "[paths]",
     "install_dir  = `"$(fwd $BinDir)`"",
@@ -259,9 +286,13 @@ $sections = [ordered]@{
     security    = @{ e=$true;  i=3600 }
     sysctl      = @{ e=$true;  i=3600 }
     configs     = @{ e=$true;  i=3600 }
+    # Continuous CIS-aligned Security Configuration Assessment (hourly)
+    sca         = @{ e=$true;  i=3600 }
     # Windows-only section - reads Security + System Event Log channels
     # Covers: logon events, process creation, service install, task manipulation
     eventlog    = @{ e=$true;  i=300  }
+    # Read-only developer, AI/MCP, persistence and credential-surface audit
+    security_audit = @{ e=$true; i=21600 }
 }
 
 foreach ($name in $sections.Keys) {
@@ -277,7 +308,14 @@ foreach ($name in $sections.Keys) {
 
 # ── Write file ─────────────────────────────────────────────────────────────────
 $content = $lines -join "`r`n"
-[System.IO.File]::WriteAllText($ConfigPath, $content, [System.Text.Encoding]::UTF8)
+$tmpConfigPath = "$ConfigPath.tmp.$([guid]::NewGuid().ToString('N'))"
+$utf8NoBom = [System.Text.UTF8Encoding]::new($false)
+[System.IO.File]::WriteAllText($tmpConfigPath, $content, $utf8NoBom)
+if (Test-Path -LiteralPath $ConfigPath) {
+    Move-Item -LiteralPath $tmpConfigPath -Destination $ConfigPath -Force
+} else {
+    Move-Item -LiteralPath $tmpConfigPath -Destination $ConfigPath
+}
 
 # ── Summary ────────────────────────────────────────────────────────────────────
 Write-Host ""
@@ -295,8 +333,6 @@ if ($EnrollToken) {
 } elseif ($ManagerApiKey -match '^[0-9a-fA-F]{64}$') {
     Write-Host "    Enrollment: api_key set directly (enrollment skipped)"
 } else {
-    Write-Warning "  Neither EnrollToken nor ManagerApiKey provided."
-    Write-Warning "  Set JARVIS_ENROLL_TOKEN environment variable before starting the service,"
-    Write-Warning "  or add token to [enrollment] in $ConfigPath"
+    Write-Host "    Enrollment: no token set (manager must allow open enrollment)"
 }
 Write-Host ""

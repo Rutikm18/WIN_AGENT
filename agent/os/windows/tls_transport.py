@@ -3,8 +3,8 @@ agent/os/windows/tls_transport.py — Hardened HTTPS transport for Windows agent
 
 Security guarantees
 ───────────────────
-• TLS 1.3 minimum — SSLContext.minimum_version = TLSVersion.TLSv1_3.
-  Older protocol versions are rejected at the handshake; no downgrade path.
+• TLS 1.2 minimum — SSLContext.minimum_version = TLSVersion.TLSv1_2.
+  TLS 1.3 is negotiated automatically when supported by both endpoints.
 • SPKI certificate pinning — the server's SubjectPublicKeyInfo SHA-256 is
   verified after every TLS handshake.  A rogue CA installed into the Windows
   trust store (admin compromise, corporate proxy) cannot MITM the agent
@@ -53,14 +53,20 @@ log = logging.getLogger("agent.windows.tls_transport")
 
 def _make_tls13_context(tls_verify: bool | str) -> ssl.SSLContext:
     """
-    Build an SSLContext that enforces TLS 1.3 minimum.
+    Build an SSLContext that enforces TLS 1.2 minimum.
 
     tls_verify=True  → system CA bundle (standard validation)
     tls_verify=False → no cert verification (dev / self-signed)
     tls_verify=str   → path to a custom CA bundle or cert file
+
+    Older protocol versions fail the handshake with ssl.SSLError; the caller
+    logs this and treats it as a transient failure so the backoff/spool path
+    handles it.
     """
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-    ctx.minimum_version = ssl.TLSVersion.TLSv1_3
+    # TLS 1.2 is the enterprise-compatible floor; TLS 1.3 is preferred
+    # automatically when supported by both endpoints.
+    ctx.minimum_version = ssl.TLSVersion.TLSv1_2
 
     if tls_verify is False:
         ctx.check_hostname = False
@@ -138,14 +144,10 @@ def _verify_spki_pin(resp: requests.Response, expected_pin: str) -> None:
     """
     sock = _extract_ssl_socket(resp)
     if sock is None:
-        # Could not reach the SSL socket — log a warning but do not hard-fail.
-        # A hard-fail here would break on urllib3 internal refactors; the TLS
-        # layer itself has already validated the cert chain.
-        log.warning(
-            "SPKI pinning: could not extract SSL socket from response — "
-            "pin check skipped. Upgrade urllib3 or disable pinning if this persists."
+        raise ssl.SSLError(
+            "SPKI pinning: peer certificate socket could not be inspected; "
+            "refusing to skip the configured pin"
         )
-        return
 
     der = sock.getpeercert(binary_form=True)
     if not der:
@@ -167,7 +169,7 @@ def _verify_spki_pin(resp: requests.Response, expected_pin: str) -> None:
 
 class _PinningAdapter(HTTPAdapter):
     """
-    HTTPAdapter that enforces TLS 1.3 and optional SPKI certificate pinning.
+    HTTPAdapter that enforces TLS 1.2+ and optional SPKI certificate pinning.
     """
 
     def __init__(self, ssl_ctx: ssl.SSLContext, spki_pin: str | None = None, **kw):
@@ -186,9 +188,12 @@ class _PinningAdapter(HTTPAdapter):
         return super().proxy_manager_for(proxy, **kw)
 
     def send(self, request: requests.PreparedRequest, **kw) -> requests.Response:
-        # Strip verify kwarg — our SSLContext already encodes the policy.
-        kw.pop("verify", None)
-        resp = super().send(request, verify=False, **kw)
+        # Preserve Requests' verification setting. WindowsTLSTransport assigns
+        # Session.verify from the validated manager configuration, while the
+        # injected SSLContext enforces the TLS floor and hostname policy.
+        # Passing verify=False here would make urllib3 try to downgrade a
+        # hostname-checking context to CERT_NONE and break secure HTTPS.
+        resp = super().send(request, **kw)
 
         if self._spki_pin:
             _verify_spki_pin(resp, self._spki_pin)
@@ -226,19 +231,36 @@ class WindowsTLSTransport:
         spki_pin: str | None = None,
         tls_verify: bool | str = True,
         timeout: tuple[int, int] = (15, 30),
+        proxy_url: str | None = None,
     ):
         self._base_url = base_url.rstrip("/")
-        self._timeout  = timeout
+        # Validate timeout: must be a (connect_sec, read_sec) tuple.
+        # A bare int is silently misinterpreted by requests as both timeouts.
+        if not isinstance(timeout, tuple) or len(timeout) != 2:
+            raise ValueError(
+                f"timeout must be a (connect, read) tuple, got {timeout!r}"
+            )
+        self._timeout = timeout
 
         ssl_ctx = _make_tls13_context(tls_verify)
         adapter = _PinningAdapter(ssl_ctx=ssl_ctx, spki_pin=spki_pin)
 
         self._session = requests.Session()
+        # A privileged service must not inherit per-user HTTP(S)_PROXY settings.
+        self._session.trust_env = False
+        # Keep Requests/urllib3 certificate policy aligned with the custom
+        # SSLContext. A string is a custom CA bundle path.
+        self._session.verify = tls_verify
+        if proxy_url:
+            self._session.proxies.update({
+                "http": proxy_url,
+                "https": proxy_url,
+            })
         self._session.mount("https://", adapter)
         # Reject plain HTTP (should never be used in production)
         self._session.mount("http://", HTTPAdapter(max_retries=0))
         self._session.headers.update({
-            "User-Agent":   "jarvis-agent-win/2.0",
+            "User-Agent":   "attacklens-agent-win/2.0",
             "Content-Type": "application/json",
         })
 
