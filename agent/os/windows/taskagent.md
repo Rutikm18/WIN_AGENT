@@ -1,6 +1,6 @@
 # taskagent.md — Windows Agent Implementation Tracker
 
-> Startup recovery, diagnosis, repair, and Docker scenario work is consolidated in [`advanced_support/`](advanced_support/README.md).
+> Historical task tracker. Completed state and remaining external release gates are consolidated in [CURRENT_IMPLEMENTATION.md](CURRENT_IMPLEMENTATION.md); support automation remains in [`advanced_support/`](advanced_support/README.md).
 
 Scope: **`agent/os/windows/` only.** This tracker records the real, verified state
 of the Windows agent (which differs from the stale `agentpromptrequired.md`) and

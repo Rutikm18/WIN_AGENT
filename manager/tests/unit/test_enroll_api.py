@@ -37,7 +37,8 @@ class MockDB:
         return self.keys.get(agent_id)
 
     async def upsert_agent_key(self, agent_id: str, api_key_hex: str,
-                                enrolled_ip: str = "") -> None:
+                                enrolled_ip: str = "", expires_at: int = 0,
+                                label: str = "") -> None:
         self.keys[agent_id] = api_key_hex
 
     async def upsert_agent(self, agent_id: str, name: str, ip: str) -> None:
@@ -49,7 +50,12 @@ class MockDB:
 def make_app(tokens: list[str]) -> tuple[FastAPI, MockDB]:
     db  = MockDB()
     app = FastAPI()
-    app.include_router(make_enroll_router(db, tokens), prefix="/api/v1")
+    # These cases exercise token-gated enrollment explicitly. Production
+    # passes the OPEN_ENROLLMENT setting as the third argument as well.
+    app.include_router(
+        make_enroll_router(db, tokens, open_enrollment=False),
+        prefix="/api/v1",
+    )
     return app, db
 
 
@@ -95,7 +101,7 @@ class TestEnrollAuth:
         c = TestClient(app)
         r = c.post("/api/v1/enroll", json=valid_body(),
                    headers={"X-Enrollment-Token": "any-token"})
-        assert r.status_code == 401
+        assert r.status_code == 503
 
 
 # ── Input validation ──────────────────────────────────────────────────────────
@@ -166,8 +172,7 @@ class TestKeyStorage:
         body = valid_body()
         c.post("/api/v1/enroll", json=body,
                headers={"X-Enrollment-Token": "tok"})
-        stored = asyncio.get_event_loop().run_until_complete(
-            db.get_agent_key("agent-001"))
+        stored = asyncio.run(db.get_agent_key("agent-001"))
         assert stored == body["api_key"].lower()
 
     def test_re_enrollment_rotates_key(self):
@@ -180,8 +185,7 @@ class TestKeyStorage:
         r = c.post("/api/v1/enroll", json=new_body,
                    headers={"X-Enrollment-Token": "tok"})
         assert r.json()["rotated"] is True
-        stored = asyncio.get_event_loop().run_until_complete(
-            db.get_agent_key("agent-001"))
+        stored = asyncio.run(db.get_agent_key("agent-001"))
         assert stored == new_body["api_key"].lower()
 
     def test_agent_registered_after_enrollment(self):

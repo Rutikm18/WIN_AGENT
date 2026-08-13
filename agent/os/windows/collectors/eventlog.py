@@ -253,6 +253,10 @@ class EventLogCollector(WinBaseCollector):
             os.environ.get("PROGRAMDATA", r"C:\ProgramData")
         ) / "AttackLens" / "data"
         self._state_path = base / "eventlog-cursors.json"
+        self._bookmark_dir = (
+            base.parent / "evtlog" if base.name.casefold() == "data"
+            else base / "evtlog"
+        )
         self._lock = threading.Lock()
         self._cursors = self._load_cursors()
         self._pending_cursors: dict[str, int] = {}
@@ -263,8 +267,80 @@ class EventLogCollector(WinBaseCollector):
         self._optional_retry_after: dict[str, int] = {}
         self._last_success_at: dict[str, int] = {}
         self._parse_errors = 0
+        self._subscriptions: dict[str, Any] = {}
+        self._streaming = False
+        self._stream_pending: list[tuple[str, dict, str]] = []
+        self._pending_bookmarks: dict[str, str] = {}
+
+    @staticmethod
+    def _bookmark_name(channel: str) -> str:
+        return re.sub(r"[^A-Za-z0-9_.-]+", "_", channel) + ".bookmark"
+
+    def start_stream(self) -> bool:
+        try:
+            import win32evtlog
+            from agent.os.windows.evtlog.subscription import ChannelSubscription
+        except ImportError as exc:
+            log.warning("push eventlog unavailable: %s", exc)
+            return False
+        started = 0
+        for channel, event_ids in _CHANNELS:
+            # Windows' restricted Event Log XPath engine rejects sufficiently
+            # large OR expressions (Security currently has 21 IDs). Give each
+            # chunk an independent bookmark so one fast callback cannot advance
+            # past an undelivered event handled by a different filter.
+            chunks = [event_ids[index:index + 16] for index in range(0, len(event_ids), 16)]
+            for chunk_index, event_id_chunk in enumerate(chunks, 1):
+                subscription_id = (
+                    channel if len(chunks) == 1 else f"{channel}#{chunk_index}"
+                )
+                subscription = ChannelSubscription(
+                    channel=channel,
+                    event_ids=event_id_chunk,
+                    bookmark_path=self._bookmark_dir / self._bookmark_name(subscription_id),
+                    parser=_parse_event_xml,
+                    capacity=max(512, _MAX_EVENTS * 4),
+                    backend=win32evtlog,
+                    lookback_ms=_LOOKBACK_MS,
+                )
+                self._subscriptions[subscription_id] = subscription
+                if subscription.start():
+                    self._record_success(channel)
+                    started += 1
+                else:
+                    health = subscription.health_snapshot()
+                    detail = str(health.get("last_error") or "subscription failed")
+                    code = "channel_unavailable" if channel in _OPTIONAL_CHANNELS else "subscription_error"
+                    self._record_error(channel, code, detail)
+        self._streaming = started > 0
+        return self._streaming
+
+    def stop_stream(self) -> None:
+        for subscription in self._subscriptions.values():
+            subscription.stop()
+        self._streaming = False
+
+    def _collect_stream(self) -> list[dict]:
+        per_channel_limit = max(1, _MAX_EVENTS // max(1, len(_CHANNELS)))
+        pending: list[tuple[str, dict, str]] = []
+        for subscription_id, subscription in self._subscriptions.items():
+            for record, bookmark_xml in subscription.drain(per_channel_limit):
+                pending.append((subscription_id, record, bookmark_xml))
+        with self._lock:
+            self._stream_pending = pending
+            self._pending_bookmarks = {
+                channel: bookmark_xml
+                for channel, _record, bookmark_xml in pending
+            }
+        events = [record for _channel, record, _bookmark in pending]
+        events.sort(key=lambda event: (
+            event.get("timestamp") or 0, event.get("record_id") or 0,
+        ))
+        return events
 
     def collect(self) -> list:
+        if self._streaming:
+            return self._collect_stream()
         try:
             import win32evtlog
         except ImportError:
@@ -342,6 +418,17 @@ class EventLogCollector(WinBaseCollector):
     def commit(self) -> None:
         """Persist prepared cursors after durable enqueue succeeds."""
         with self._lock:
+            if self._pending_bookmarks:
+                for channel, bookmark_xml in self._pending_bookmarks.items():
+                    self._write_bookmark(channel, bookmark_xml)
+                restart_channels = [
+                    channel for channel, subscription in self._subscriptions.items()
+                    if subscription.paused
+                ]
+                self._stream_pending = []
+                self._pending_bookmarks = {}
+                for channel in restart_channels:
+                    self._subscriptions[channel].restart_from_committed()
             if not self._pending_cursors:
                 return
             updated = dict(self._cursors)
@@ -360,6 +447,13 @@ class EventLogCollector(WinBaseCollector):
     def rollback(self) -> None:
         """Forget prepared cursor updates so the next cycle re-reads records."""
         with self._lock:
+            if self._stream_pending:
+                # Discard volatile later events and replay from the last
+                # durable bookmark. This is at-least-once, never at-most-once.
+                for subscription in self._subscriptions.values():
+                    subscription.restart_from_committed()
+                self._stream_pending = []
+                self._pending_bookmarks = {}
             self._pending_cursors = {}
             self._pending_resets = set()
 
@@ -374,7 +468,27 @@ class EventLogCollector(WinBaseCollector):
                 "channel_status": dict(self._channel_status),
                 "last_success_at": dict(self._last_success_at),
                 "parse_errors": self._parse_errors,
+                "streaming": self._streaming,
+                "pending_bookmarks": sorted(self._pending_bookmarks),
+                "subscriptions": {
+                    channel: subscription.health_snapshot()
+                    for channel, subscription in self._subscriptions.items()
+                },
             }
+
+    def _write_bookmark(self, channel: str, bookmark_xml: str) -> None:
+        self._bookmark_dir.mkdir(parents=True, exist_ok=True)
+        path = self._bookmark_dir / self._bookmark_name(channel)
+        temp = path.with_suffix(path.suffix + ".tmp")
+        try:
+            with temp.open("w", encoding="utf-8") as handle:
+                handle.write(bookmark_xml)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temp, path)
+        except Exception:
+            temp.unlink(missing_ok=True)
+            raise
 
     def _load_cursors(self) -> dict[str, int]:
         if not self._state_path.exists():

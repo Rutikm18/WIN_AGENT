@@ -21,6 +21,10 @@ psutil>=5.9.8
 requests>=2.31.0
 urllib3>=2.0.0
 
+# ETW consumer used for continuous process and DNS telemetry. 0.2.0 is the
+# latest pywintrace release and was smoke-tested with Python 3.13 on Windows 11.
+pywintrace==0.2.0
+
 # OPTIONAL — only needed to load YAML Security Configuration Assessment (SCA)
 # drop-in policies from C:\ProgramData\AttackLens\sca\. The bundled CIS baseline
 # is a Python module and requires no parser; JSON drop-ins use the stdlib. Omit

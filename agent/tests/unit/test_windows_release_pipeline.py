@@ -90,14 +90,33 @@ def test_gui_and_silent_installs_are_license_gated():
     assert "Endpoint data and security" in license_text
 
 
-def test_secure_manager_defaults_and_service_start_order():
+def test_secure_optional_manager_defaults_and_service_start_order():
     wix = WIX.read_text(encoding="utf-8")
     generator = CONFIG_GENERATOR.read_text(encoding="utf-8")
     assert '<Property Id="MANAGER_IP" Secure="yes" />' in wix
-    assert '<Property Id="MANAGER_PORT" Value="443" Secure="yes" />' in wix
+    assert '<Property Id="MANAGER_PORT" Value="8080" Secure="yes" />' in wix
+    assert '<Property Id="TLS_VERIFY"    Value="false" Secure="yes" />' in wix
+    assert '<Property Id="ALLOW_INSECURE_TRANSPORT" Value="true" Secure="yes" />' in wix
     assert 'Value="localhost"' not in wix
-    assert 'MANAGER_URL or MANAGER_IP is required' in generator
-    assert '<ServiceDependency Id="AttackLensAgent" />' in wix
+    assert 'MANAGER_URL or MANAGER_IP is required' not in generator
+    assert "$managerUrl = ''" in generator
+    assert "if ($managerUrl -and $managerUrl -notmatch" in generator
+    assert "Captured installer configuration: manager_source=" in generator
+    assert '<ServiceDependency Id="AttackLensAgent" />' not in wix
+
+
+def test_config_acl_migration_recovers_legacy_owner_before_failing_install():
+    wix = WIX.read_text(encoding="utf-8")
+    generator = CONFIG_GENERATOR.read_text(encoding="utf-8")
+    assert "takeown.exe /F $target /A" in generator
+    assert "Cannot bootstrap SYSTEM access" in generator
+    assert "installer-config.log" in generator
+    assert "Preserved existing configuration and repaired its ACL successfully." in generator
+    assert generator.index("$aclOutput = & icacls @aclArgs") < generator.index(
+        "$ownerOutput = & icacls.exe $target /setowner"
+    )
+    assert "[System64Folder]WindowsPowerShell\\v1.0\\powershell.exe" in wix
+    assert "[SystemFolder]WindowsPowerShell\\v1.0\\powershell.exe" not in wix
 
 
 def test_msi_version_bounds_match_windows_installer_contract():
@@ -117,8 +136,32 @@ def test_compiled_msi_is_verified_after_ice_validation():
         "AttackLens Software License Agreement",
         "SecureCustomProperties",
         "MsiHiddenProperties",
-        "AttackLensWatchdog must depend on AttackLensAgent",
+        "must not have SCM dependencies",
+        "must use 64-bit PowerShell from System64Folder",
         "MSI File table",
         "TimeStamperCertificate",
+        "attacklens-msi-payload-",
+        "Compiled payload",
+        "ConfigureManagerScript",
+        "PrepareConfigDataScript",
     ):
         assert marker in verifier
+
+
+def test_compiled_msi_verifier_checks_graduated_scm_recovery_policy():
+    verifier = RELEASE_VERIFY.read_text(encoding="utf-8")
+    assert "CA_SetAgentRecoveryActions" in verifier
+    assert "restart/5000/restart/10000/restart/30000" in verifier
+    assert "CA_SetAgentFailureFlag" in verifier
+    assert "failureflag AttackLensAgent 1" in verifier
+    assert "MsiConfigureServices" in verifier
+    assert "before StartServices" in verifier
+
+
+def test_compiled_msi_verifier_checks_delayed_start_and_preshutdown_timeout():
+    verifier = RELEASE_VERIFY.read_text(encoding="utf-8")
+    assert "must compile as automatic start" in verifier
+    assert "DelayedAutostart" in verifier
+    assert "AttackLensWatchdog" in verifier
+    assert "PreshutdownTimeout" in verifier
+    assert "#180000" in verifier

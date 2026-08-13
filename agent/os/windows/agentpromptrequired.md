@@ -1,6 +1,6 @@
 # Windows Agent — Full Implementation Prompt
 
-> Current startup recovery and diagnostic behavior supersedes older prompt assumptions; see [`advanced_support/`](advanced_support/README.md).
+> Historical implementation input. The verified result and remaining external gates are tracked in [CURRENT_IMPLEMENTATION.md](CURRENT_IMPLEMENTATION.md); do not treat unfinished items below as current status. Startup tooling remains in [`advanced_support/`](advanced_support/README.md).
 
 ## Context
 

@@ -21,6 +21,8 @@ from __future__ import annotations
 import logging
 import os
 import subprocess
+import threading
+import time
 from abc import ABC, abstractmethod
 from typing import Union
 
@@ -37,6 +39,8 @@ class WinBaseCollector(ABC):
     """Abstract base for all Windows data collectors."""
 
     timeout: int = 15   # seconds — override per-collector for slow queries
+    budget_headroom_sec: float = 3.0
+    _budget_local = threading.local()
 
     @property
     @abstractmethod
@@ -53,7 +57,25 @@ class WinBaseCollector(ABC):
         ...
 
     def __call__(self) -> CollectorResult:
-        return self.collect()
+        previous_deadline = getattr(self._budget_local, "deadline", None)
+        previous_exhausted = getattr(self._budget_local, "exhausted", False)
+        self._budget_local.deadline = time.monotonic() + max(
+            0.1,
+            float(self.timeout) - self.budget_headroom_sec,
+        )
+        self._budget_local.exhausted = False
+        try:
+            return self.collect()
+        finally:
+            if previous_deadline is None:
+                for attribute in ("deadline", "exhausted"):
+                    try:
+                        delattr(self._budget_local, attribute)
+                    except AttributeError:
+                        pass
+            else:
+                self._budget_local.deadline = previous_deadline
+                self._budget_local.exhausted = previous_exhausted
 
     def __repr__(self) -> str:
         return f"<{self.__class__.__name__} section={self.name!r}>"
@@ -66,12 +88,27 @@ class WinBaseCollector(ABC):
         Suppresses the console window (CREATE_NO_WINDOW).
         Returns "" on any error; logs distinct messages for timeout vs not-found.
         """
+        deadline = getattr(self._budget_local, "deadline", None)
+        remaining = (
+            float(self.timeout)
+            if deadline is None
+            else float(deadline) - time.monotonic()
+        )
+        if remaining <= 0.05:
+            if not getattr(self._budget_local, "exhausted", False):
+                log.warning(
+                    "collector subprocess budget exhausted section=%s",
+                    self.name,
+                )
+                self._budget_local.exhausted = True
+            return ""
+        command_timeout = max(0.05, min(float(self.timeout), remaining))
         try:
             r = subprocess.run(
                 cmd,
                 capture_output=True,
                 text=True,
-                timeout=self.timeout,
+                timeout=command_timeout,
                 errors="replace",
                 creationflags=CREATE_NO_WINDOW,
             )
@@ -82,7 +119,7 @@ class WinBaseCollector(ABC):
             return ""
         except subprocess.TimeoutExpired:
             # Tool hung — worth a warning so operators know which collector is slow.
-            log.warning("command timed out after %ds: %s", self.timeout,
+            log.warning("command timed out after %.1fs: %s", command_timeout,
                         cmd[0] if cmd else "?")
             return ""
         except Exception as exc:

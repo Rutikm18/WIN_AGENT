@@ -24,7 +24,6 @@ from __future__ import annotations
 import json
 import logging
 import platform
-import secrets
 import socket
 import ssl
 import sys
@@ -118,14 +117,18 @@ def enroll(cfg: dict) -> str:
         raise EnrollmentError(f"Manager enrollment request failed: {exc}") from exc
 
     # Step 2 — extract the key from the manager's response
-    api_key = response.get("api_key", "").strip()
-    if not api_key or len(api_key) != 64:
-        # Old manager that doesn't return a key — fall back to local generation
-        log.warning(
-            "Manager did not return an api_key in enrollment response. "
-            "Generating a local key (ensure manager supports v2 enrollment)."
+    # Never invent a local key here: the manager would not know it and
+    # subsequent authenticated uploads would fail.
+    if not isinstance(response, dict):
+        raise EnrollmentError("Manager enrollment response was not a JSON object")
+    raw_api_key = response.get("api_key")
+    api_key = raw_api_key.strip() if isinstance(raw_api_key, str) else ""
+    if len(api_key) != 64 or not all(
+        character in "0123456789abcdefABCDEF" for character in api_key
+    ):
+        raise EnrollmentError(
+            "Manager enrollment response did not contain a valid 256-bit api_key"
         )
-        api_key = secrets.token_hex(32)
 
     # Step 3 — persist the key to keystore
     try:
@@ -135,7 +138,13 @@ def enroll(cfg: dict) -> str:
             f"Keystore write failed after enrollment: {exc}"
         ) from exc
 
-    expires_at = response.get("expires_at", 0)
+    raw_expires_at = response.get("expires_at", 0)
+    try:
+        expires_at = int(raw_expires_at or 0)
+    except (TypeError, ValueError):
+        log.warning("Manager returned invalid expires_at=%r; treating key as non-expiring",
+                    raw_expires_at)
+        expires_at = 0
     if expires_at:
         log.info(
             "Enrollment complete: agent_id=%s  key expires=%s UTC",
@@ -149,18 +158,22 @@ def enroll(cfg: dict) -> str:
 
 # ── Internal ──────────────────────────────────────────────────────────────────
 
-def _post_enroll(url: str, token: str, payload: dict, tls_verify: bool) -> dict:
+def _post_enroll(url: str, token: str, payload: dict, tls_verify: bool | str) -> dict:
     """POST enrollment request and return the parsed JSON response body."""
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
     ctx.minimum_version = ssl.TLSVersion.TLSv1_3
-    if not tls_verify:
+    if tls_verify is False:
         ctx.check_hostname = False
         ctx.verify_mode    = ssl.CERT_NONE
+    elif isinstance(tls_verify, str):
+        ctx.load_verify_locations(cafile=tls_verify)
+    else:
+        ctx.load_default_certs(ssl.Purpose.SERVER_AUTH)
 
     body    = json.dumps(payload).encode()
     headers = {
         "Content-Type": "application/json",
-        "User-Agent":   "macintel-agent/2.0",
+        "User-Agent":   "attacklens-agent/2.0",
     }
     # Only send the token header when a token is actually configured.
     if token:

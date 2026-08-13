@@ -32,6 +32,7 @@ import sys
 import tempfile
 import threading
 import time
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch, call
 
@@ -80,13 +81,14 @@ class TestWatchdogCoreRateLimit:
             core._restarts.append(now)
 
         with patch.object(core, "_start_agent_service") as start_mock, \
-             patch.object(core, "_event_log_error") as err_mock, \
-             patch.object(core, "_sleep"):          # don't actually sleep
+             patch.object(core, "_event_log_error") as err_mock:
             core._attempt_restart()
 
         err_mock.assert_called_once()
-        # After the back-off the window is cleared, so restart is tried once
-        start_mock.assert_called_once()
+        # The circuit opens without blocking the watchdog worker or making a
+        # guaranteed-to-fail final request. A later poll retries after cooldown.
+        start_mock.assert_not_called()
+        assert core._cooldown_until > time.monotonic()
 
     def test_old_timestamps_evicted(self):
         """Timestamps outside RESTART_WINDOW_SEC must not count."""
@@ -205,60 +207,131 @@ class TestConfigsCheck:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class TestArpCollector:
-    """Test ARP table parsing without spawning real processes."""
-
-    _SAMPLE_OUTPUT = """\
-Interface: 192.168.1.5 --- 0xb
-  Internet Address      Physical Address      Type
-  192.168.1.1           aa-bb-cc-dd-ee-ff     dynamic
-  192.168.1.255         ff-ff-ff-ff-ff-ff     static
-  10.0.0.3              00-11-22-33-44-55     dynamic
-"""
+    """Test native GetIpNetTable2 row parsing without subprocesses."""
 
     def _make_collector(self):
         from agent.os.windows.collectors.network import ArpCollector
         return ArpCollector()
 
-    def test_mac_normalized_to_colon(self):
-        c = self._make_collector()
-        with patch.object(c, "_run", return_value=self._SAMPLE_OUTPUT):
-            result = c.collect()
-        # 192.168.1.1 entry
-        entry = next(e for e in result if e["ip"] == "192.168.1.1")
-        assert entry["mac"] == "aa:bb:cc:dd:ee:ff"
+    @staticmethod
+    def _row(ip: str, mac: bytes, *, state: int = 5, interface: int = 7):
+        import socket
+        from agent.os.windows.collectors.network import _MibIpNetRow2
 
-    def test_broadcast_mac_filtered(self):
-        c = self._make_collector()
-        with patch.object(c, "_run", return_value=self._SAMPLE_OUTPUT):
-            result = c.collect()
-        broadcast = [e for e in result if e["ip"] == "192.168.1.255"]
-        # broadcast entry present but mac is None
-        assert len(broadcast) == 1
-        assert broadcast[0]["mac"] is None
+        row = _MibIpNetRow2()
+        row.address.family = socket.AF_INET
+        for index, value in enumerate(socket.inet_pton(socket.AF_INET, ip)):
+            row.address.raw[4 + index] = value
+        row.interface_index = interface
+        row.physical_address_length = len(mac)
+        for index, value in enumerate(mac):
+            row.physical_address[index] = value
+        row.state = state
+        return row
 
-    def test_interface_header_tracked(self):
-        c = self._make_collector()
-        with patch.object(c, "_run", return_value=self._SAMPLE_OUTPUT):
-            result = c.collect()
-        assert all(e["interface"] == "192.168.1.5" for e in result)
+    def test_native_row_normalizes_mac_state_and_interface(self):
+        from agent.os.windows.collectors.network import _row_to_neighbor
 
-    def test_invalid_ip_lines_skipped(self):
-        bad = "Interface: 10.0.0.1 --- 0xa\n  not.an.ip  aa-bb-cc-dd-ee-ff  dynamic\n"
-        c = self._make_collector()
-        with patch.object(c, "_run", return_value=bad):
-            result = c.collect()
-        assert result == []
+        row = self._row("192.168.1.1", bytes.fromhex("aabbccddeeff"))
+        with patch("socket.if_indextoname", return_value="Ethernet"):
+            result = _row_to_neighbor(row)
+        assert result == {
+            "ip": "192.168.1.1",
+            "mac": "aa:bb:cc:dd:ee:ff",
+            "interface": "Ethernet",
+            "state": "reachable",
+        }
 
-    def test_empty_output_returns_empty_list(self):
+    def test_multicast_or_broadcast_mac_is_filtered(self):
+        from agent.os.windows.collectors.network import _row_to_neighbor
+
+        row = self._row("192.168.1.255", bytes.fromhex("ffffffffffff"))
+        with patch("socket.if_indextoname", return_value="Ethernet"):
+            result = _row_to_neighbor(row)
+        assert result is None
+
+    def test_protocol_multicast_without_mac_is_filtered(self):
+        from agent.os.windows.collectors.network import _row_to_neighbor
+
+        row = self._row("224.0.0.251", b"")
+        with patch("socket.if_indextoname", return_value="Ethernet"):
+            result = _row_to_neighbor(row)
+        assert result is None
+
+    def test_collector_uses_native_api_and_never_spawns_arp(self):
         c = self._make_collector()
-        with patch.object(c, "_run", return_value=""):
+        expected = [{"ip": "10.0.0.1", "mac": None, "interface": "1", "state": "stale"}]
+        with patch(
+            "agent.os.windows.collectors.network._native_neighbors",
+            return_value=expected,
+        ), patch.object(c, "_run", side_effect=AssertionError("subprocess forbidden")):
             result = c.collect()
-        assert result == []
+        assert result == expected
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # 4. PortsCollector — protocol detection
 # ═══════════════════════════════════════════════════════════════════════════════
+
+class TestServicesCollector:
+    """SCM enumeration is typed, locale-independent, and never shells out."""
+
+    @staticmethod
+    def _api():
+        api = MagicMock()
+        api.SC_MANAGER_ENUMERATE_SERVICE = 4
+        api.SERVICE_WIN32 = 0x30
+        api.SERVICE_DRIVER = 0x0B
+        api.SERVICE_STATE_ALL = 3
+        api.SERVICE_QUERY_CONFIG = 1
+        api.SERVICE_DISABLED = 4
+        api.SERVICE_DEMAND_START = 3
+        api.OpenSCManager.return_value = "scm"
+        api.OpenService.side_effect = lambda scm, name, access: f"handle:{name}"
+        return api
+
+    def test_native_scm_maps_state_start_type_driver_and_pid(self):
+        from agent.os.windows.collectors.system import _native_services
+
+        api = self._api()
+        api.EnumServicesStatusEx.return_value = [
+            {"ServiceName": "AttackLensAgent", "DisplayName": "AttackLens Agent",
+             "CurrentState": 4, "ServiceType": 0x10, "ProcessId": 4321},
+            ("LegacyDrv", "Legacy Driver", {
+                "CurrentState": 1, "ServiceType": 0x01, "ProcessId": 0,
+            }),
+        ]
+        api.QueryServiceConfig.side_effect = [
+            (0x10, 2, 1, "agent.exe", None, 0, [], "LocalSystem", "AttackLens Agent"),
+            (0x01, 4, 1, "driver.sys", None, 0, [], "System", "Legacy Driver"),
+        ]
+
+        rows = _native_services(api)
+        assert rows[0] == {
+            "name": "AttackLensAgent", "status": "running", "enabled": True,
+            "pid": 4321, "type": "winsvc", "description": "AttackLens Agent",
+        }
+        assert rows[1]["status"] == "disabled"
+        assert rows[1]["enabled"] is False
+        assert rows[1]["pid"] is None
+        assert rows[1]["type"] == "windriver"
+        assert api.CloseServiceHandle.call_count == 3
+
+    def test_collector_never_uses_sc_or_powershell(self):
+        from agent.os.windows.collectors.system import ServicesCollector
+
+        collector = ServicesCollector()
+        expected = [{"name": "Svc", "status": "running"}]
+        with patch(
+            "agent.os.windows.collectors.system._native_services",
+            return_value=expected,
+        ), patch.object(
+            collector, "_run", side_effect=AssertionError("subprocess forbidden")
+        ), patch.object(
+            collector, "_run_ps", side_effect=AssertionError("PowerShell forbidden")
+        ):
+            assert collector.collect() == expected
+
 
 class TestPortsCollector:
     def _make_collector(self):
@@ -317,28 +390,26 @@ class TestPortsCollector:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class TestBinariesCollector:
-    def test_sha256_partial_known_value(self, tmp_path):
+    def test_sha256_full_file_known_value(self, tmp_path):
         import hashlib
-        from agent.os.windows.collectors.inventory import _sha256_partial
+        from agent.os.windows.collectors.inventory import _sha256_file
         data = b"hello windows agent"
         fpath = tmp_path / "test.bin"
         fpath.write_bytes(data)
         expected = hashlib.sha256(data).hexdigest()
-        assert _sha256_partial(str(fpath), 4096) == expected
+        assert _sha256_file(str(fpath)) == expected
 
-    def test_sha256_partial_returns_none_on_missing_file(self):
-        from agent.os.windows.collectors.inventory import _sha256_partial
-        assert _sha256_partial("/nonexistent/path/file.exe", 4096) is None
+    def test_sha256_full_file_returns_none_on_missing_file(self):
+        from agent.os.windows.collectors.inventory import _sha256_file
+        assert _sha256_file("/nonexistent/path/file.exe") is None
 
-    def test_sha256_partial_cap_respected(self, tmp_path):
-        import hashlib
-        from agent.os.windows.collectors.inventory import _sha256_partial
+    def test_sha256_full_file_deadline_respected(self, tmp_path):
+        import time
+        from agent.os.windows.collectors.inventory import _sha256_file
         data = b"A" * 200
         fpath = tmp_path / "large.bin"
         fpath.write_bytes(data)
-        cap = 10
-        expected = hashlib.sha256(data[:cap]).hexdigest()
-        assert _sha256_partial(str(fpath), cap) == expected
+        assert _sha256_file(str(fpath), deadline=time.monotonic() - 1) is None
 
     def test_collect_skips_non_exe(self, tmp_path):
         from agent.os.windows.collectors.inventory import BinariesCollector
@@ -369,75 +440,110 @@ class TestBinariesCollector:
 # 6. TasksCollector CSV fallback — embedded commas
 # ═══════════════════════════════════════════════════════════════════════════════
 
-class TestTasksCsvFallback:
-    """Verify that csv.reader correctly handles quoted commas in task fields."""
+class TestTasksComCollector:
+    """Task Scheduler COM traversal, mapping, and thread initialization."""
 
-    def _make_csv(self, rows: list[list[str]]) -> str:
-        buf = io.StringIO()
-        writer = csv.writer(buf, quoting=csv.QUOTE_ALL)
-        for row in rows:
-            writer.writerow(row)
-        return buf.getvalue()
+    @staticmethod
+    def _task(path, *, enabled=True):
+        from datetime import datetime, timezone
 
-    def test_command_with_embedded_comma(self):
+        action = SimpleNamespace(Type=0, Path="cmd.exe", Arguments='/c "echo hello, world"')
+        trigger = SimpleNamespace(Type=2, StartBoundary="2026-08-11T12:00:00")
+        definition = SimpleNamespace(
+            Actions=[action], Triggers=[trigger],
+            Principal=SimpleNamespace(UserId="SYSTEM"),
+        )
+        return SimpleNamespace(
+            Path=path, Name=path.rsplit("\\", 1)[-1], Definition=definition,
+            Enabled=enabled,
+            LastRunTime=datetime(2026, 8, 11, 10, 0, tzinfo=timezone.utc),
+            NextRunTime=datetime(2026, 8, 12, 10, 0, tzinfo=timezone.utc),
+        )
+
+    def test_recursive_com_collection_maps_actions_triggers_and_dates(self):
+        from agent.os.windows.collectors.inventory import _native_scheduled_tasks
+
+        child = MagicMock()
+        child.Path = r"\Folder"
+        child.GetFolders.return_value = []
+        child.GetTasks.return_value = [self._task(r"\Folder\MyTask")]
+        root = MagicMock()
+        root.Path = "\\"
+        root.GetFolders.return_value = [child]
+        root.GetTasks.return_value = [self._task(r"\Disabled", enabled=False)]
+        scheduler = MagicMock()
+        scheduler.GetFolder.return_value = root
+        dispatch = MagicMock(return_value=scheduler)
+        runtime = MagicMock()
+
+        rows = _native_scheduled_tasks(dispatch, runtime)
+        by_name = {row["name"]: row for row in rows}
+        assert by_name[r"\Folder\MyTask"]["command"] == 'cmd.exe /c "echo hello, world"'
+        assert by_name[r"\Folder\MyTask"]["schedule"] == "daily:2026-08-11T12:00:00"
+        assert by_name[r"\Folder\MyTask"]["user"] == "SYSTEM"
+        assert by_name[r"\Folder\MyTask"]["last_run"] is not None
+        assert by_name[r"\Disabled"]["enabled"] is False
+        dispatch.assert_called_once_with("Schedule.Service")
+        scheduler.Connect.assert_called_once_with()
+        runtime.CoInitialize.assert_called_once_with()
+        runtime.CoUninitialize.assert_called_once_with()
+
+    def test_collector_never_uses_powershell_or_schtasks(self):
         from agent.os.windows.collectors.inventory import TasksCollector
 
-        header = ["HostName", "TaskName", "Next Run Time", "Status",
-                  "Logon Mode", "Last Run Time", "Last Result",
-                  "Author", "Task To Run", "Start In", "Comment",
-                  "Scheduled Task State", "Idle Time", "Power Management",
-                  "Run As User", "Delete Task If Not Rescheduled",
-                  "Stop Task If Runs X Hours and X Mins", "Schedule",
-                  "Schedule Type", "Start Time", "Start Date", "End Date",
-                  "Days", "Months", "Repeat: Every", "Repeat: Until: Time",
-                  "Repeat: Until: Duration", "Repeat: Stop If Still Running"]
-        # Task To Run has an embedded comma
-        row = ["MYHOST", r"\Folder\MyTask", "N/A", "Ready",
-               "Interactive/Background only", "N/A", "0",
-               "SYSTEM", 'cmd.exe /c "echo hello, world"', "",
-               "Some comment, with comma", "Enabled", "Disabled",
-               "Stop On Battery Mode, No Start On Batteries",
-               "SYSTEM", "Disabled", "72:00:00",
-               "Scheduling data is not available in this format.",
-               "Daily", "12:00:00", "1/1/2026", "12/31/2026",
-               "Every week", "Every 1 week(s)", "Disabled", "Disabled",
-               "Disabled", "Disabled"]
-        csv_output = self._make_csv([header, row])
+        collector = TasksCollector()
+        expected = [{"name": r"\Task", "type": "schtasks"}]
+        with patch(
+            "agent.os.windows.collectors.inventory._native_scheduled_tasks",
+            return_value=expected,
+        ), patch.object(
+            collector, "_run", side_effect=AssertionError("subprocess forbidden")
+        ), patch.object(
+            collector, "_run_ps", side_effect=AssertionError("PowerShell forbidden")
+        ):
+            assert collector.collect() == expected
 
-        c = TasksCollector()
-        # Force PS to fail so fallback triggers
-        with patch.object(c, "_run_ps", return_value="INVALID_JSON"), \
-             patch.object(c, "_run", return_value=csv_output):
-            result = c.collect()
 
-        assert len(result) == 1
-        assert result[0]["command"] == 'cmd.exe /c "echo hello, world"'
-        assert result[0]["enabled"] is True
-        assert result[0]["name"] == r"\Folder\MyTask"
+class TestAppsRegistryViews:
+    def test_hklm_and_hkcu_both_wow64_views_are_enumerated_and_deduplicated(self):
+        from agent.os.windows.collectors.inventory import AppsCollector
 
-    def test_disabled_task_not_enabled(self):
-        from agent.os.windows.collectors.inventory import TasksCollector
+        winreg = SimpleNamespace(
+            HKEY_LOCAL_MACHINE="HKLM", HKEY_CURRENT_USER="HKCU",
+            KEY_WOW64_64KEY=0x100, KEY_WOW64_32KEY=0x200,
+        )
 
-        header = ["HostName", "TaskName", "Status", "Task To Run",
-                  "Schedule Type", "Run As User"]
-        row    = ["HOST", r"\MyTask", "Disabled", "notepad.exe", "Daily", "SYSTEM"]
-        csv_output = self._make_csv([header, row])
+        def value(_hive, _path, name, view):
+            values = {
+                "DisplayName": "Example App",
+                "DisplayVersion": "64.0" if view == 0x100 else "32.0",
+                "Publisher": "Example Corp",
+                "InstallLocation": "C:\\App64" if view == 0x100 else "C:\\App32",
+                "InstallDate": "20260811",
+            }
+            return values[name]
 
-        c = TasksCollector()
-        with patch.object(c, "_run_ps", return_value="{}"), \
-             patch.object(c, "_run", return_value=csv_output):
-            result = c.collect()
+        collector = AppsCollector()
+        with patch.dict(sys.modules, {"winreg": winreg}), patch(
+            "agent.os.windows.collectors.inventory._registry_subkeys",
+            return_value=["Example"],
+        ) as enumerate_mock, patch(
+            "agent.os.windows.collectors.inventory._rv", side_effect=value,
+        ), patch.object(
+            collector, "_run", side_effect=AssertionError("subprocess forbidden")
+        ), patch.object(
+            collector, "_run_ps", side_effect=AssertionError("PowerShell forbidden")
+        ):
+            rows = collector.collect()
 
-        assert len(result) == 1
-        assert result[0]["enabled"] is False
-
-    def test_empty_csv_returns_no_tasks(self):
-        from agent.os.windows.collectors.inventory import TasksCollector
-        c = TasksCollector()
-        with patch.object(c, "_run_ps", return_value="NOT_JSON"), \
-             patch.object(c, "_run", return_value=""):
-            result = c.collect()
-        assert result == []
+        assert len(rows) == 2  # HKLM/HKCU duplicates collapse; x86/x64 remain.
+        assert {row["version"] for row in rows} == {"32.0", "64.0"}
+        assert enumerate_mock.call_args_list == [
+            call("HKLM", r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall", 0x100),
+            call("HKLM", r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall", 0x200),
+            call("HKCU", r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall", 0x100),
+            call("HKCU", r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall", 0x200),
+        ]
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -647,7 +753,9 @@ class TestWinBaseCollectorRun:
             out = c._run_ps("Get-Date")
         run_mock.assert_called_once()
         cmd = run_mock.call_args.args[0]
-        assert cmd[0] == "powershell.exe"
+        # Production resolves PowerShell from System32 to prevent a
+        # user-writable PATH shim from being executed by LocalSystem.
+        assert Path(cmd[0]).name.lower() == "powershell.exe"
         assert "-Command" in cmd
         assert "Get-Date" in cmd
 
@@ -658,6 +766,27 @@ class TestWinBaseCollectorRun:
         cmd = run_mock.call_args.args[0]
         assert "-ExecutionPolicy" in cmd
         assert "Bypass" in cmd
+
+    def test_subprocess_calls_share_one_section_budget(self):
+        from agent.os.windows.collectors.base import WinBaseCollector
+
+        class _Budgeted(WinBaseCollector):
+            name = "budgeted"
+            timeout = 10
+
+            def collect(self):
+                return [self._run(["first"]), self._run(["second"])]
+
+        result = MagicMock(stdout="ok")
+        with patch(
+            "agent.os.windows.collectors.base.time.monotonic",
+            side_effect=[100.0, 101.0, 108.1],
+        ), patch("subprocess.run", return_value=result) as run_mock:
+            output = _Budgeted()()
+
+        assert output == ["ok", ""]
+        assert run_mock.call_count == 1
+        assert run_mock.call_args.kwargs["timeout"] == pytest.approx(6.0)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -781,59 +910,71 @@ class TestMountsCollector:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class TestUsersCollector:
-    import json as _json
+    @staticmethod
+    def _apis():
+        net = MagicMock()
+        constants = SimpleNamespace(
+            FILTER_NORMAL_ACCOUNT=2,
+            UF_ACCOUNTDISABLE=0x0002,
+            UF_LOCKOUT=0x0010,
+        )
+        security = MagicMock()
+        security.ConvertStringSidToSid.return_value = "S-1-5-32-544"
+        security.LookupAccountSid.return_value = ("Administrators", "BUILTIN", 4)
+        return net, constants, security
 
-    def _make_collector(self):
+    def test_native_accounts_admin_last_logon_and_lock_flags(self):
+        from agent.os.windows.collectors.system import _native_local_users
+
+        net, constants, security = self._apis()
+        net.NetLocalGroupGetMembers.return_value = (
+            [{"domainandname": "DESKTOP\\Alice"}], 1, 0,
+        )
+        net.NetUserEnum.return_value = ([
+            {"name": "Alice", "flags": 0, "last_logon": 1700000000,
+             "home_dir": "D:\\Profiles\\Alice"},
+            {"name": "Guest", "flags": 0x0002, "last_logon": 0,
+             "home_dir": ""},
+            {"name": "Locked", "flags": 0x0010, "last_logon": 0,
+             "home_dir": ""},
+        ], 3, 0)
+
+        rows = _native_local_users(net, constants, security)
+        assert rows[0]["admin"] is True
+        assert rows[0]["last_login"] == 1700000000
+        assert rows[0]["home"] == "D:\\Profiles\\Alice"
+        assert rows[1]["locked"] is True
+        assert rows[1]["last_login"] is None
+        assert rows[1]["home"] == "C:\\Users\\Guest"
+        assert rows[2]["locked"] is True
+        security.LookupAccountSid.assert_called_once()
+
+    def test_netapi_pagination_is_drained(self):
+        from agent.os.windows.collectors.system import _paged_net_call
+
+        api_call = MagicMock(side_effect=[
+            ([{"name": "one"}], 2, 123),
+            ([{"name": "two"}], 2, 0),
+        ])
+        assert _paged_net_call(api_call, None, 3, 2) == [
+            {"name": "one"}, {"name": "two"},
+        ]
+        assert api_call.call_args_list == [call(None, 3, 2, 0), call(None, 3, 2, 123)]
+
+    def test_collector_never_uses_powershell_or_net_command(self):
         from agent.os.windows.collectors.system import UsersCollector
-        return UsersCollector()
 
-    def test_powershell_datetime_parsed(self):
-        import json
-        c = self._make_collector()
-        # Simulate /Date(ms)/ format from PowerShell JSON serialiser
-        ts_ms = 1700000000 * 1000
-        ps_users_out = json.dumps([{
-            "Name": "Alice", "Enabled": True,
-            "LastLogon": f"/Date({ts_ms})/",
-        }])
-        with patch.object(c, "_run_ps", return_value=ps_users_out), \
-             patch("psutil.users", return_value=[]):
-            result = c.collect()
-        assert len(result) == 1
-        assert result[0]["name"] == "Alice"
-        assert result[0]["last_login"] == 1700000000
-
-    def test_admin_membership_flagged(self):
-        import json
-        c = self._make_collector()
-        ps_users_out = json.dumps([{"Name": "admin1", "Enabled": True, "LastLogon": None}])
-        # admins group returns ["DESKTOP\\admin1"]
-        adm_out = json.dumps(["DESKTOP\\admin1"])
-
-        call_count = {"n": 0}
-        def fake_run_ps(script):
-            call_count["n"] += 1
-            if "Get-LocalGroupMember" in script:
-                return adm_out
-            return ps_users_out
-
-        with patch.object(c, "_run_ps", side_effect=fake_run_ps), \
-             patch("psutil.users", return_value=[]):
-            result = c.collect()
-
-        admins = [u for u in result if u["admin"]]
-        assert len(admins) == 1
-        assert admins[0]["name"] == "admin1"
-
-    def test_locked_account_detected(self):
-        import json
-        c = self._make_collector()
-        ps_users_out = json.dumps([{"Name": "guest", "Enabled": False, "LastLogon": None}])
-        with patch.object(c, "_run_ps", return_value=ps_users_out), \
-             patch("psutil.users", return_value=[]):
-            result = c.collect()
-        assert len(result) == 1
-        assert result[0]["locked"] is True
+        collector = UsersCollector()
+        expected = [{"name": "Alice", "last_login": 10}]
+        with patch(
+            "agent.os.windows.collectors.system._native_local_users",
+            return_value=expected,
+        ), patch("psutil.users", return_value=[]), patch.object(
+            collector, "_run", side_effect=AssertionError("subprocess forbidden")
+        ), patch.object(
+            collector, "_run_ps", side_effect=AssertionError("PowerShell forbidden")
+        ):
+            assert collector.collect() == expected
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -990,3 +1131,291 @@ class TestImportability:
 
     def test_watchdog_svc_importable(self):
         import agent.os.windows.watchdog_svc  # noqa: F401
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 15. ScaEngine — rule grammar, condition logic, policy loading (mock runner)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestScaEngine:
+    """SCA engine evaluation is OS-agnostic and driven by an injected runner."""
+
+    def _engine(self, responses, rules, condition="all"):
+        from agent.os.windows.sca.engine import ScaEngine
+
+        def runner(cmd, timeout):
+            return responses.get(cmd, (1, ""))
+
+        pol = {"id": "t", "name": "t",
+               "checks": [{"id": "c", "title": "c",
+                           "condition": condition, "rules": rules}]}
+        return ScaEngine(runner=runner, bundled_policies=[pol])
+
+    def _result(self, responses, rules, condition="all"):
+        eng = self._engine(responses, rules, condition)
+        return eng.scan()["policies"][0]["checks"][0]["result"]
+
+    def test_regex_matcher_pass_and_fail(self):
+        r = {"cmd": (0, "value is 1")}
+        assert self._result(r, [r"c:cmd -> r:value is 1"]) == "pass"
+        assert self._result(r, [r"c:cmd -> r:value is 9"]) == "fail"
+
+    def test_negated_matcher(self):
+        r = {"cmd": (0, "value is 0")}
+        assert self._result(r, [r"c:cmd -> !r:value is 1"]) == "pass"
+
+    def test_numeric_compare(self):
+        r = {"cmd": (0, "Days: 12")}
+        assert self._result(r, [r"c:cmd -> n:Days: (\d+) compare <= 45"]) == "pass"
+        assert self._result(r, [r"c:cmd -> n:Days: (\d+) compare > 45"]) == "fail"
+
+    def test_literal_substring(self):
+        assert self._result({"cmd": (0, "value is 1")}, [r"c:cmd -> value is"]) == "pass"
+
+    def test_exit_code_only(self):
+        assert self._result({"cmd": (0, "")}, [r"c:cmd"]) == "pass"
+        assert self._result({"cmd": (1, "")}, [r"c:cmd"]) == "fail"
+
+    def test_condition_any(self):
+        r = {"a": (0, "no"), "b": (0, "yes")}
+        assert self._result(r, [r"c:a -> r:yes", r"c:b -> r:yes"], "any") == "pass"
+
+    def test_condition_none(self):
+        assert self._result({"c": (0, "clean")}, [r"c:c -> r:bad"], "none") == "pass"
+        assert self._result({"c": (0, "bad")},   [r"c:c -> r:bad"], "none") == "fail"
+
+    def test_execution_error_is_tri_state(self):
+        # runner returns rc=None → engine reports 'error', not 'fail'
+        assert self._result({"c": (None, "")}, [r"c:c -> r:x"], "all") == "error"
+
+    def test_not_rule_prefix(self):
+        assert self._result({"c": (0, "value is 0")},
+                            [r"not c:c -> r:value is 1"], "all") == "pass"
+
+    def test_file_rule_missing(self):
+        assert self._result({}, [r"f:Z:\definitely\missing\path"], "all") == "fail"
+
+    def test_summary_score(self):
+        from agent.os.windows.sca.engine import ScaEngine
+
+        def runner(cmd, timeout):
+            return {"ok": (0, "1"), "bad": (0, "0")}.get(cmd, (1, ""))
+
+        pol = {"id": "p", "name": "p", "checks": [
+            {"id": "1", "title": "1", "rules": [r"c:ok -> r:1"]},
+            {"id": "2", "title": "2", "rules": [r"c:bad -> r:1"]},
+        ]}
+        out = ScaEngine(runner=runner, bundled_policies=[pol]).scan()
+        s = out["summary"]
+        assert s["total"] == 2 and s["pass"] == 1 and s["fail"] == 1
+        assert s["score_pct"] == 50.0
+
+    def test_bundled_policy_has_checks(self):
+        from agent.os.windows.sca import BUNDLED_POLICIES
+        assert BUNDLED_POLICIES and BUNDLED_POLICIES[0]["checks"]
+        for chk in BUNDLED_POLICIES[0]["checks"]:
+            assert chk["id"] and chk["title"] and chk["rules"]
+            assert chk.get("condition", "all") in ("all", "any", "none")
+
+    def test_platform_filter_excludes_non_windows(self):
+        from agent.os.windows.sca.engine import ScaEngine
+        pol = {"id": "lin", "name": "lin", "platform": ["linux"],
+               "checks": [{"id": "x", "title": "x", "rules": [r"c:whatever"]}]}
+        out = ScaEngine(runner=lambda c, t: (0, ""),
+                        bundled_policies=[pol], platform="windows").scan()
+        assert out["policies"] == []
+
+
+class TestScaCollector:
+    """Collector wiring: tokenizer, registration, never-raise contract."""
+
+    def test_tokenizer_preserves_backslashes_and_quotes(self):
+        from agent.os.windows.collectors.sca import _tokenize
+        toks = _tokenize(r'reg query "HKLM\Windows NT\x" /v Name')
+        assert toks == ["reg", "query", r"HKLM\Windows NT\x", "/v", "Name"]
+
+    def test_tokenizer_mid_token_quote(self):
+        from agent.os.windows.collectors.sca import _tokenize
+        toks = _tokenize(r'auditpol /get /category:"Logon/Logoff"')
+        assert toks == ["auditpol", "/get", "/category:Logon/Logoff"]
+
+    def test_collect_never_raises_returns_dict(self):
+        # Force the runner to error on every command; collect() must still
+        # return a well-formed dict with all checks marked (never raise).
+        import agent.os.windows.collectors.sca as sca_mod
+        with patch.object(sca_mod, "_route_command", return_value=(None, "")):
+            out = sca_mod.ScaCollector().collect()
+        assert isinstance(out, dict)
+        assert "policies" in out and "summary" in out
+
+    def test_registered_in_collectors(self):
+        from agent.os.windows.collectors import COLLECTORS
+        assert "sca" in COLLECTORS
+
+    def test_normalizer_handles_sca(self):
+        from agent.os.windows.normalizer import normalize
+        raw = {"policies": [{"policy_id": "p", "policy_name": "P",
+                             "checks": [{"id": "1", "title": "t", "result": "pass"}],
+                             "summary": {"total": 1, "pass": 1}}],
+               "summary": {"total": 1, "pass": 1, "fail": 0,
+                           "not_applicable": 0, "error": 0, "score_pct": 100.0}}
+        out = normalize("sca", raw)
+        assert out["summary"]["pass"] == 1
+        assert out["policies"][0]["checks"][0]["result"] == "pass"
+
+    def test_sca_module_importable(self):
+        import agent.os.windows.collectors.sca  # noqa: F401
+        import agent.os.windows.sca             # noqa: F401
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 16. Volatile enhancements — per-core CPU, connection direction/service, signing
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestMetricsPerCore:
+    def test_cpu_per_core_present(self):
+        import agent.os.windows.collectors.volatile as vol
+        fake = MagicMock()
+        fake.cpu_percent.return_value = [10.0, 20.0, 30.0, 40.0]
+        fake.cpu_count.return_value = 4
+        fake.virtual_memory.return_value = SimpleNamespace(
+            percent=50.0, used=8 * 1024**3, total=16 * 1024**3)
+        fake.swap_memory.return_value = SimpleNamespace(percent=0.0, used=0, total=0)
+        fake.boot_time.return_value = time.time() - 100
+        fake.disk_io_counters.return_value = None
+        fake.net_io_counters.return_value = None
+        fake.cpu_freq.return_value = None
+        with patch.object(vol, "psutil", fake):
+            out = vol.MetricsCollector().collect()
+        assert out["cpu_per_core"] == [10.0, 20.0, 30.0, 40.0]
+        # aggregate is the mean of the per-core sample
+        assert out["cpu_pct"] == 25.0
+
+    def test_normalizer_coerces_per_core(self):
+        from agent.os.windows.normalizer import normalize
+        out = normalize("metrics", {"cpu_pct": 5, "cpu_per_core": ["1.5", 2, "bad"]})
+        assert out["cpu_per_core"] == [1.5, 2.0, 0.0]
+
+
+class TestConnectionDirection:
+    def _sock(self, ip, port, status, stype=1, raddr=None, pid=1):
+        return SimpleNamespace(
+            family="AF_INET", type=stype, status=status, pid=pid,
+            laddr=SimpleNamespace(ip=ip, port=port),
+            raddr=(SimpleNamespace(ip=raddr[0], port=raddr[1]) if raddr else ()),
+        )
+
+    def test_direction_inbound_outbound_listen(self):
+        import agent.os.windows.collectors.volatile as vol
+        fake = MagicMock()
+        fake.CONN_LISTEN = "LISTEN"
+        fake.process_iter.return_value = []
+        socks = [
+            self._sock("0.0.0.0", 443, "LISTEN"),                       # listen
+            self._sock("10.0.0.5", 443, "ESTABLISHED", raddr=("1.2.3.4", 55000)),  # inbound (443 is listening)
+            self._sock("10.0.0.5", 51000, "ESTABLISHED", raddr=("1.2.3.4", 443)),  # outbound
+            self._sock("0.0.0.0", 53, "NONE", stype=2),                # udp bound
+        ]
+        fake.net_connections.return_value = socks
+        with patch.object(vol, "psutil", fake):
+            rows = vol.ConnectionsCollector().collect()
+        # key on (port, state) since a listener and a live conn can share a port
+        by = {(r["local_port"], r["state"]): r for r in rows}
+        listen = by[(443, "LISTEN")]
+        assert listen["direction"] == "listen" and listen["service"] == "https"
+        est_in = by[(443, "ESTABLISHED")]
+        assert est_in["direction"] == "inbound"
+        assert by[(51000, "ESTABLISHED")]["direction"] == "outbound"
+        udp = by[(53, "NONE")]
+        assert udp["proto"] == "udp" and udp["direction"] is None and udp["service"] == "dns"
+
+    def test_normalizer_carries_direction_service(self):
+        from agent.os.windows.normalizer import normalize
+        out = normalize("connections", [{"proto": "tcp", "local_port": 443,
+                                          "direction": "inbound", "service": "https"}])
+        assert out[0]["direction"] == "inbound" and out[0]["service"] == "https"
+
+
+class TestProcessSigning:
+    def test_signed_field_added_and_exe_dropped(self):
+        import agent.os.windows.collectors.volatile as vol
+        proc = SimpleNamespace(pid=100, info={
+            "pid": 100, "ppid": 1, "name": "svc.exe", "username": "SYSTEM",
+            "cpu_percent": 5.0, "memory_percent": 1.0,
+            "memory_info": SimpleNamespace(rss=1024 * 1024),
+            "status": "running", "create_time": 0, "cmdline": ["svc.exe"],
+            "exe": r"C:\Windows\System32\svc.exe",
+        })
+        fake = MagicMock()
+        fake.process_iter.return_value = [proc]
+        fake.NoSuchProcess = Exception
+        fake.AccessDenied = Exception
+        with patch.object(vol, "psutil", fake), \
+             patch.object(vol, "_authenticode_status", return_value="signed") as sig:
+            rows = vol.ProcessesCollector().collect()
+        assert rows[0]["signed"] == "signed"
+        assert "_exe" not in rows[0]
+        sig.assert_called_once_with(r"C:\Windows\System32\svc.exe")
+
+    def test_authenticode_none_off_windows(self):
+        import agent.os.windows.collectors.volatile as vol
+        with patch.object(vol.sys, "platform", "linux"):
+            assert vol._authenticode_status(r"C:\x.exe") is None
+        assert vol._authenticode_status(None) is None
+
+    def test_normalizer_carries_signed(self):
+        from agent.os.windows.normalizer import normalize
+        out = normalize("processes", [{"pid": 1, "name": "a", "signed": "unsigned"}])
+        assert out[0]["signed"] == "unsigned"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 17. win_agent SCA wiring — regression guard
+#
+# win_agent.py has its OWN collector list + interval table, separate from the
+# collectors/__init__.py COLLECTORS registry. A collector missing here never
+# runs in the shipped Windows agent even if registered elsewhere.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestWinAgentScaWiring:
+    def _agent(self):
+        from agent.os.windows.win_agent import WindowsAgent
+        cfg = {
+            "agent": {"id": "t", "name": "t"},
+            "manager": {"url": "https://x", "api_key": "a" * 64},
+            "paths": {
+                "security_dir": "x", "spool_dir": "x", "log_dir": "x",
+                "data_dir": "x",
+            },
+            "collection": {"sections": {}},
+        }
+        return WindowsAgent(cfg)
+
+    def test_sca_in_interval_table(self):
+        from agent.os.windows.win_agent import _INTERVALS
+        assert "sca" in _INTERVALS, "win_agent._INTERVALS must include 'sca' or it never schedules"
+
+    def test_sca_scheduled_and_loaded(self):
+        a = self._agent()
+        assert "sca" in a._active_intervals
+        a._load_collectors()
+        assert "sca" in a._collectors
+        assert type(a._collectors["sca"]).__name__ == "ScaCollector"
+
+    def test_win_agent_loads_all_registry_collectors(self):
+        # Every section in the shared COLLECTORS registry must also be loadable by
+        # win_agent, so nothing is registered-but-never-run in the shipped binary.
+        from agent.os.windows.collectors import COLLECTORS
+        a = self._agent()
+        a._load_collectors()
+        missing = set(COLLECTORS) - set(a._collectors)
+        assert not missing, f"win_agent does not load registry collectors: {missing}"
+
+
+def test_windows_registry_does_not_eagerly_construct_stateful_collectors():
+    from agent.os.windows.collectors import COLLECTORS
+
+    # Test discovery and diagnostics must not touch protected ProgramData.
+    assert len(COLLECTORS) >= 25
+    assert "eventlog" in COLLECTORS
+    assert "eventlog" not in COLLECTORS._instances

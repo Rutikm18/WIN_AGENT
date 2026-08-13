@@ -114,6 +114,21 @@ class ConnectionsCollector(WinBaseCollector):
     name    = "connections"
     timeout = 10
 
+    def __init__(self, event_provider=None) -> None:
+        if event_provider is None:
+            from agent.os.windows.etw.dns_provider import DnsEtwProvider
+            event_provider = DnsEtwProvider()
+        self._event_provider = event_provider
+
+    def start_stream(self) -> bool:
+        return bool(self._event_provider.start())
+
+    def stop_stream(self) -> None:
+        self._event_provider.stop()
+
+    def health_snapshot(self) -> dict:
+        return {"dns_etw": self._event_provider.health_snapshot()}
+
     def collect(self) -> list:
         conns: list[dict] = []
 
@@ -132,7 +147,7 @@ class ConnectionsCollector(WinBaseCollector):
             sockets = psutil.net_connections(kind="inet")
         except Exception as exc:
             log.debug("connections: %s", exc)
-            return conns
+            sockets = []
 
         # First pass: collect the local ports we are LISTENing on so that an
         # ESTABLISHED connection can be labelled inbound (we are the server) vs
@@ -182,6 +197,43 @@ class ConnectionsCollector(WinBaseCollector):
             except Exception:
                 continue
 
+        for event in self._event_provider.drain(256):
+            pid = event.get("pid")
+            process = pid_names.get(pid or 0)
+            if not process and pid:
+                try:
+                    process = psutil.Process(pid).name()
+                except (psutil.NoSuchProcess, psutil.AccessDenied, OSError):
+                    pass
+            dns_server = event.get("dns_server")
+            # A server list may contain multiple addresses; retain it in _win
+            # and use only an unambiguous single address canonically.
+            remote = dns_server if dns_server and ";" not in dns_server else None
+            conns.append({
+                "proto": "dns",
+                "local_addr": "",
+                "local_port": 0,
+                "remote_addr": remote,
+                "remote_port": 53 if remote else None,
+                "state": str(event.get("event") or "query").upper(),
+                "direction": "outbound",
+                "service": "dns",
+                "pid": pid,
+                "process": process,
+                "_win": {
+                    "source": "etw",
+                    "event_id": event.get("event_id"),
+                    "event_at": event.get("timestamp"),
+                    "query_name": event.get("query_name"),
+                    "query_type": event.get("query_type"),
+                    "query_status": event.get("status"),
+                    "query_results": event.get("results"),
+                    "dns_server": dns_server,
+                    "interface": event.get("interface"),
+                    "interface_index": event.get("interface_index"),
+                },
+            })
+
         return conns
 
 
@@ -196,6 +248,21 @@ class ProcessesCollector(WinBaseCollector):
         "cpu_percent", "memory_percent", "memory_info",
         "status", "create_time", "cmdline", "exe",
     ]
+
+    def __init__(self, event_provider=None) -> None:
+        if event_provider is None:
+            from agent.os.windows.etw.process_provider import ProcessEtwProvider
+            event_provider = ProcessEtwProvider()
+        self._event_provider = event_provider
+
+    def start_stream(self) -> bool:
+        return bool(self._event_provider.start())
+
+    def stop_stream(self) -> None:
+        self._event_provider.stop()
+
+    def health_snapshot(self) -> dict:
+        return {"etw": self._event_provider.health_snapshot()}
 
     def collect(self) -> list:
         procs: list[dict] = []
@@ -239,6 +306,49 @@ class ProcessesCollector(WinBaseCollector):
         # check is bounded-cached, so steady-state cost is a dict lookup.
         for row in top:
             row["signed"] = _authenticode_status(row.pop("_exe", None))
+
+        # Preserve the periodic snapshot while adding start/stop events for
+        # processes that may exist for less than one collection interval.
+        for event in self._event_provider.drain(128):
+            pid = event.get("pid")
+            if pid is None:
+                continue
+            image_path = event.get("image_path")
+            name = event.get("name") or ""
+            user = cmdline = None
+            if event.get("event") == "start":
+                try:
+                    process = psutil.Process(pid)
+                    image_path = process.exe() or image_path
+                    name = process.name() or name
+                    user = process.username()
+                    cmdline = " ".join(process.cmdline())[:512] or None
+                except (psutil.NoSuchProcess, psutil.AccessDenied, OSError):
+                    pass
+            top.append({
+                "pid": pid,
+                "ppid": event.get("ppid"),
+                "name": name,
+                "user": user,
+                "cpu_pct": 0.0,
+                "mem_pct": 0.0,
+                "mem_rss_mb": None,
+                "status": "running" if event.get("event") == "start" else "stopped",
+                "started_at": event.get("started_at"),
+                "cmdline": cmdline,
+                "signed": _authenticode_status(image_path),
+                "_win": {
+                    "source": "etw",
+                    "event": event.get("event"),
+                    "event_at": event.get("event_at"),
+                    "image_path": image_path,
+                    "integrity_level": event.get("integrity_level"),
+                    "elevated": event.get("elevated"),
+                    "sequence": event.get("sequence"),
+                    "session_id": event.get("session_id"),
+                    "exit_code": event.get("exit_code"),
+                },
+            })
 
         return top
 

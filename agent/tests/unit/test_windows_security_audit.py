@@ -7,7 +7,10 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
+
+import psutil
 
 from agent.os.windows.collectors.security_audit import (
     WindowsSecurityAuditCollector,
@@ -99,6 +102,11 @@ class FilesystemInventoryTests(unittest.TestCase):
             self.skipTest("directory symlinks are unavailable")
         self.assertEqual(self.collector._ide_extensions([self.profile]), [])
 
+    def test_oversized_extension_manifest_is_rejected(self):
+        manifest = self.profile / ".cursor" / "extensions" / "oversized" / "package.json"
+        self._write(manifest, '{"name":"codex", "padding":"' + ("x" * (1024 * 1024)) + '"}')
+        self.assertEqual(self.collector._ide_extensions([self.profile]), [])
+
     def test_mcp_inventory_parses_jsonc_and_never_emits_env_values(self):
         config = self.profile / ".cursor" / "mcp.json"
         self._write(config, r'''
@@ -135,6 +143,22 @@ class FilesystemInventoryTests(unittest.TestCase):
         self.assertEqual(server["command"], "C:/Program Files/Server/server.exe")
         self.assertEqual(server["env_names"], ["API_TOKEN"])
         self.assertNotIn("never-send", json.dumps(result))
+
+    def test_invalid_mcp_json_is_metadata_only_and_does_not_abort(self):
+        config = self.profile / ".vscode" / "mcp.json"
+        self._write(config, '{"mcpServers": { invalid json')
+        result = self.collector._mcp_inventory([self.profile])
+        self.assertEqual(result["servers"], [])
+        self.assertEqual(result["config_files"][0]["status"], "invalid")
+
+    def test_profile_override_is_capped(self):
+        profiles = []
+        for index in range(70):
+            profile = Path(self.temp.name) / f"profile-{index}"
+            profile.mkdir()
+            profiles.append(profile)
+        collector = WindowsSecurityAuditCollector(profiles)
+        self.assertEqual(len(collector._profiles()), 64)
 
     def test_node_inventory_reads_scoped_manifest_without_execution(self):
         manifest = (
@@ -206,6 +230,64 @@ class RiskAndIsolationTests(unittest.TestCase):
         self.assertFalse(check(r'"C:\Program Files\Vendor\svc.exe" -run'))
         self.assertFalse(check(r"C:\Windows\System32\svchost.exe -k netsvcs"))
 
+    def test_scheduled_task_redacts_secret_and_flags_encoded_execution(self):
+        collector = WindowsSecurityAuditCollector([])
+        task = {
+            "TaskPath": "\\", "TaskName": "SensitiveTask", "State": "Ready",
+            "Execute": "powershell.exe", "Arguments": "--token never-send -encodedcommand AAAA",
+            "WorkingDirectory": "C:\\Temp", "UserId": "SYSTEM", "RunLevel": "Highest",
+        }
+        with mock.patch.object(collector, "_ps_json", return_value=[task]):
+            result = collector._scheduled_tasks()
+        serialized = json.dumps(result)
+        self.assertNotIn("never-send", serialized)
+        self.assertIn("script_host", result[0]["risk_signals"])
+        self.assertIn("download_or_obfuscated", result[0]["risk_signals"])
+
+    def test_service_audit_flags_unquoted_user_profile_binary(self):
+        collector = WindowsSecurityAuditCollector([])
+        service = {
+            "Name": "Unsafe", "DisplayName": "Unsafe", "State": "Running",
+            "StartMode": "Auto", "PathName": r"C:\Users\demo\Agent Tool\agent.exe --run",
+            "StartName": "LocalSystem", "ProcessId": 10,
+        }
+        with mock.patch.object(collector, "_ps_json", return_value=[service]):
+            result = collector._services()
+        self.assertIn("unquoted_service_path", result[0]["risk_signals"])
+        self.assertIn("user_profile_binary", result[0]["risk_signals"])
+
+    def test_browser_extension_flags_native_messaging_and_all_hosts(self):
+        with tempfile.TemporaryDirectory() as root:
+            profile = Path(root) / "User"
+            manifest = (
+                profile / "AppData" / "Local" / "Google" / "Chrome" / "User Data" /
+                "Default" / "Extensions" / "abc" / "1.0" / "manifest.json"
+            )
+            manifest.parent.mkdir(parents=True)
+            manifest.write_text(json.dumps({
+                "name": "Test", "version": "1.0",
+                "permissions": ["nativeMessaging"],
+                "host_permissions": ["<all_urls>"],
+            }), encoding="utf-8")
+            collector = WindowsSecurityAuditCollector([profile])
+            result = collector._browser_extensions([profile])
+        self.assertIn("nativemessaging", result[0]["risk_signals"])
+        self.assertIn("all_hosts", result[0]["risk_signals"])
+
+    def test_listener_flags_ai_process_bound_to_all_interfaces(self):
+        collector = WindowsSecurityAuditCollector([])
+        process = SimpleNamespace(info={"pid": 42, "name": "ollama.exe", "exe": r"C:\Program Files\Ollama\ollama.exe"})
+        connection = SimpleNamespace(
+            status=psutil.CONN_LISTEN, type=1,
+            laddr=SimpleNamespace(ip="0.0.0.0", port=11434), pid=42,
+        )
+        with mock.patch("agent.os.windows.collectors.security_audit.psutil.process_iter", return_value=[process]), \
+                mock.patch("agent.os.windows.collectors.security_audit.psutil.net_connections", return_value=[connection]):
+            result = collector._listeners()
+        self.assertTrue(result[0]["public_bind"])
+        self.assertEqual(result[0]["process"], "ollama.exe")
+        self.assertTrue(any(item["id"] == "ai_public_listener" for item in collector._findings))
+
     def test_domain_failure_is_isolated_and_secret_free(self):
         collector = WindowsSecurityAuditCollector([])
         collector._deadline = time.monotonic() + 10
@@ -245,6 +327,8 @@ class RiskAndIsolationTests(unittest.TestCase):
         }])
 
         def fake_run(command):
+            if command[1] == "version":
+                return json.dumps("27.0.0")
             if command[1:3] == ["ps", "--all"]:
                 return summary
             if command[1] == "inspect":
@@ -285,6 +369,16 @@ class WiringTests(unittest.TestCase):
         })
         agent._load_collectors()
         self.assertIsInstance(agent._collectors["security_audit"], WindowsSecurityAuditCollector)
+
+    def test_security_audit_can_be_explicitly_disabled(self):
+        from agent.os.windows.win_agent import WindowsAgent
+        agent = WindowsAgent({
+            "agent": {"id": "test", "name": "test"},
+            "manager": {"url": "https://manager.test", "api_key": "a" * 64},
+            "paths": {"security_dir": "x", "spool_dir": "x", "log_dir": "x", "data_dir": "x"},
+            "collection": {"sections": {"security_audit": {"enabled": False}}},
+        })
+        self.assertNotIn("security_audit", agent._active_intervals)
 
     def test_normalizer_rejects_invalid_root(self):
         from agent.os.windows.normalizer import normalize

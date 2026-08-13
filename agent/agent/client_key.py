@@ -168,9 +168,9 @@ def _parse(raw: str) -> ClientKey:
 
 def _serialise(ck: ClientKey) -> str:
     return (
-        "# Jarvis Agent Identity\n"
+        "# AttackLens Agent Identity\n"
         "# Auto-generated on first enrollment. Do not edit manually.\n"
-        "# To re-enroll: delete this file and restart the JarvisAgent service.\n"
+        "# To re-enroll: delete this file and restart the AttackLensAgent service.\n"
         "\n"
         "[identity]\n"
         f'agent_name   = "{ck.agent_name}"\n'

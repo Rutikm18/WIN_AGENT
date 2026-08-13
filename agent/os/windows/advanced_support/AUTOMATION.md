@@ -1,5 +1,7 @@
 # Diagnosis, Repair, and Docker Automation
 
+> Verified 2026-08-12 against build 2.0.19; see [../CURRENT_IMPLEMENTATION.md](../CURRENT_IMPLEMENTATION.md). The Docker command now covers nine recovery/self-defense scenarios.
+
 ## Repair a rolled-back installation
 
 When MSI error 1603/1722 leaves the services absent, run the support tool from
@@ -13,8 +15,8 @@ and, when binaries are absent, stops before attempting service registration:
 Then install the corrected MSI with a verbose log:
 
 ```powershell
-msiexec /i attacklens-agent-2.0.10-x64.msi /qn ACCEPT_EULA=1 `
-  /l*v "$env:TEMP\attacklens-install-2.0.10.log"
+msiexec /i attacklens-agent-2.0.19-x64.msi /qn ACCEPT_EULA=1 `
+  /l*v "$env:TEMP\attacklens-install-2.0.19.log"
 ```
 
 Configuration-action evidence persists at
@@ -55,7 +57,7 @@ The Docker lab tests portable recovery rules without Windows privileges or netwo
 docker compose run --rm --build diagnostics
 ```
 
-The single command covers missing config, last-known-good restoration, corrupt runtime quarantine, corrupt outbox detection and preservation, SCM error classification, and scenario-engine integrity. Native SCM, Event Log, DPAPI, and Windows ACL checks remain part of the PowerShell workflow because Linux containers cannot faithfully emulate the Windows Service Control Manager.
+The single command covers missing config, last-known-good restoration, corrupt runtime quarantine, corrupt outbox detection and preservation, SCM error classification, disk pressure, ACL drift repair, Defender-exclusion alerts, binary-integrity stop conditions, and scenario-engine integrity. Native SCM, Event Log, DPAPI, and Windows ACL implementation checks remain part of the PowerShell/Windows test workflow because Linux containers cannot faithfully emulate the Windows Service Control Manager.
 
 ## Exit and escalation policy
 

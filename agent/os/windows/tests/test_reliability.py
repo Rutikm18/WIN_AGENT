@@ -18,7 +18,7 @@ from agent.os.windows.collectors.eventlog import _parse_event_xml
 from agent.os.windows.collectors.inventory import BinariesCollector, SbomCollector
 from agent.os.windows.acl import NETWORK_SERVICE, POLICIES
 from agent.os.windows.config_model import ConfigValidationError, load_config_dict
-from agent.os.windows.diagnostics import connectivity_test
+from agent.os.windows.diagnostics import _outbox_status, connectivity_test
 from agent.os.windows.integrity import (
     IntegrityError,
     create_manifest,
@@ -198,6 +198,118 @@ class ReliableOutboxTests(unittest.TestCase):
                 self.assertIsNotNone(outbox.next_due())
                 outbox.close()
 
+    def test_pressure_pruning_removes_only_oldest_dead_letters(self) -> None:
+        with tempfile.TemporaryDirectory() as root:
+            with mock.patch(
+                "agent.os.windows.reliable_outbox._PayloadProtector._repair_acl"
+            ):
+                outbox = ReliableOutbox(
+                    os.path.join(root, "spool"),
+                    os.path.join(root, "security"),
+                    "agent-pressure",
+                )
+                outbox.enqueue_many([
+                    {"delivery_id": f"dead-{index}", "section": "apps", "data": [index]}
+                    for index in range(20)
+                ], state="dead", error="manager_rejected")
+                outbox.enqueue(
+                    {"delivery_id": "pending-one", "section": "eventlog", "data": [1]}
+                )
+                reclaimed = outbox.prune_oldest_dead_letters(fraction=0.10)
+                stats = outbox.stats()
+                self.assertEqual(reclaimed["rows"], 2)
+                self.assertGreater(reclaimed["bytes"], 0)
+                self.assertEqual(stats["dead_letters"], 18)
+                self.assertEqual(stats["pending"], 1)
+                self.assertEqual(outbox.next_due().delivery_id, "pending-one")
+                outbox.close()
+
+    def test_diagnostics_aggregate_dead_letters_without_payload_or_detail(self) -> None:
+        with tempfile.TemporaryDirectory() as root:
+            spool = os.path.join(root, "spool")
+            with mock.patch(
+                "agent.os.windows.reliable_outbox._PayloadProtector._repair_acl"
+            ):
+                outbox = ReliableOutbox(
+                    spool,
+                    os.path.join(root, "security"),
+                    "agent-diagnostics",
+                )
+                outbox.enqueue(
+                    {
+                        "delivery_id": "dead-sensitive",
+                        "section": "binaries",
+                        "data": {"secret_marker": "never-report-this"},
+                    },
+                    state="dead",
+                    error="http_422:sensitive manager detail",
+                )
+                outbox.close()
+            report = _outbox_status(spool)
+            rendered = json.dumps(report)
+            self.assertEqual(report["dead_letter_reasons"][0]["reason"], "http_422")
+            self.assertEqual(report["dead_letter_sections"][0]["section"], "binaries")
+            self.assertNotIn("sensitive manager detail", rendered)
+            self.assertNotIn("never-report-this", rendered)
+
+    def test_disk_pressure_uses_dead_letter_space_without_dropping_pending(self) -> None:
+        with tempfile.TemporaryDirectory() as root:
+            cfg = _config(root)
+            agent = WindowsAgent(cfg)
+            with mock.patch(
+                "agent.os.windows.reliable_outbox._PayloadProtector._repair_acl"
+            ):
+                agent._outbox = ReliableOutbox(
+                    cfg["paths"]["spool_dir"],
+                    cfg["paths"]["security_dir"],
+                    cfg["agent"]["id"],
+                )
+                agent._outbox.enqueue_many([
+                    {"delivery_id": f"dead-{index}", "section": "apps", "data": [index]}
+                    for index in range(10)
+                ], state="dead", error="manager_rejected")
+                usage = type("Usage", (), {"free": 0})()
+                with mock.patch(
+                    "agent.os.windows.win_agent.shutil.disk_usage",
+                    return_value=usage,
+                ):
+                    queued = agent._queue_collected_data("metrics", {"cpu": 1})
+                stats = agent._outbox.stats()
+                self.assertTrue(queued)
+                self.assertEqual(stats["dead_letters"], 9)
+                self.assertEqual(stats["pending"], 1)
+                self.assertEqual(
+                    agent._delivery_snapshot()["disk_pressure_evicted_dead_letters"],
+                    1,
+                )
+                agent._outbox.close()
+
+    def test_disk_pressure_defers_new_collection_when_no_safe_eviction_exists(self) -> None:
+        with tempfile.TemporaryDirectory() as root:
+            cfg = _config(root)
+            agent = WindowsAgent(cfg)
+            with mock.patch(
+                "agent.os.windows.reliable_outbox._PayloadProtector._repair_acl"
+            ):
+                agent._outbox = ReliableOutbox(
+                    cfg["paths"]["spool_dir"],
+                    cfg["paths"]["security_dir"],
+                    cfg["agent"]["id"],
+                )
+                usage = type("Usage", (), {"free": 0})()
+                with mock.patch(
+                    "agent.os.windows.win_agent.shutil.disk_usage",
+                    return_value=usage,
+                ):
+                    queued = agent._queue_collected_data("metrics", {"cpu": 1})
+                self.assertFalse(queued)
+                self.assertEqual(agent._outbox.stats()["pending"], 0)
+                self.assertEqual(
+                    agent._delivery_snapshot()["disk_pressure_deferred"],
+                    1,
+                )
+                agent._outbox.close()
+
     def test_existing_database_never_silently_replaces_missing_key(self) -> None:
         with tempfile.TemporaryDirectory() as root:
             spool = os.path.join(root, "spool")
@@ -303,6 +415,74 @@ class OfflineSpoolTests(unittest.TestCase):
             self.assertFalse(sender.is_alive())
             self.assertEqual(agent._outbox.stats()["pending"], 1)
             self.assertEqual(agent._connection_state, "manager_unconfigured")
+            agent._outbox.close()
+
+    def test_unsupported_section_opens_circuit_and_does_not_block_supported_data(self) -> None:
+        class _Response:
+            headers: dict[str, str] = {}
+
+            def __init__(self, status: int, body: dict) -> None:
+                self.status_code = status
+                self._body = body
+                self.text = json.dumps(body)
+
+            def json(self):
+                return self._body
+
+        class _Transport:
+            calls = 0
+
+            def __init__(self, **_kwargs):
+                pass
+
+            def post(self, *_args, **_kwargs):
+                type(self).calls += 1
+                if type(self).calls == 1:
+                    return _Response(
+                        422,
+                        {"detail": "Unsupported telemetry section: 'eventlog'"},
+                    )
+                return _Response(200, {"status": "ok"})
+
+            def close(self):
+                pass
+
+        with tempfile.TemporaryDirectory() as root:
+            agent = self._offline_agent(root)
+            agent._cfg["manager"]["url"] = "http://manager.example:8080"
+            agent._enc_key, agent._mac_key = derive_keys("a" * 64)
+            agent._outbox.enqueue_many([
+                agent._new_message("eventlog", [{"event_id": index}])
+                for index in range(3)
+            ])
+            agent._outbox.enqueue(agent._new_message("metrics", {"cpu": 1}))
+            with mock.patch(
+                "agent.os.windows.tls_transport.WindowsTLSTransport",
+                _Transport,
+            ):
+                sender = threading.Thread(target=agent._reliable_sender_loop)
+                sender.start()
+                deadline = time.monotonic() + 3
+                while time.monotonic() < deadline:
+                    if agent._outbox.stats()["pending"] == 0:
+                        break
+                    time.sleep(0.01)
+                agent.stop()
+                sender.join(timeout=2)
+
+            stats = agent._outbox.stats()
+            self.assertEqual(_Transport.calls, 2)
+            self.assertEqual(stats["pending"], 0)
+            self.assertEqual(stats["dead_letters"], 3)
+            self.assertIn("eventlog", agent._unsupported_sections)
+            self.assertFalse(
+                agent._queue_collected_data("eventlog", [{"event_id": 99}])
+            )
+            self.assertEqual(agent._outbox.stats()["pending"], 0)
+            self.assertEqual(
+                agent._delivery_snapshot()["unsupported_section_suppressed"],
+                1,
+            )
             agent._outbox.close()
 
 
@@ -413,7 +593,9 @@ class CursorAndConfigTests(unittest.TestCase):
     def test_default_configuration_activates_all_collectors(self) -> None:
         with tempfile.TemporaryDirectory() as root:
             agent = WindowsAgent(_config(root))
-            self.assertEqual(len(agent._active_intervals), 25)
+            self.assertEqual(len(agent._active_intervals), 27)
+            self.assertIn("persistence", agent._active_intervals)
+            self.assertIn("developer_security", agent._active_intervals)
             self.assertEqual(
                 set(agent._active_intervals),
                 {
@@ -422,7 +604,8 @@ class CursorAndConfigTests(unittest.TestCase):
                     "services", "users", "hardware", "containers",
                     "storage", "tasks", "apps", "packages", "binaries",
                     "sbom", "security", "sysctl", "configs", "sca",
-                    "eventlog", "security_audit",
+                    "eventlog", "persistence", "developer_security",
+                    "security_audit",
                 },
             )
 
@@ -597,8 +780,10 @@ class AdvancedResilienceTests(unittest.TestCase):
             self.handle = handle
             self.closed: list[int] = []
             self.released: list[int] = []
+            self.created: list[tuple[object, bool, str]] = []
 
-        def CreateMutexW(self, *_args):
+        def CreateMutexW(self, security, initial_owner, name):
+            self.created.append((security, bool(initial_owner), str(name)))
             return self.handle
 
         def CloseHandle(self, handle):
@@ -615,6 +800,10 @@ class AdvancedResilienceTests(unittest.TestCase):
             kernel32=kernel, get_last_error=lambda: 0
         ).acquire()
         self.assertTrue(guard.acquired)
+        self.assertEqual(
+            kernel.created,
+            [(None, True, r"Global\AttackLensAgent")],
+        )
         guard.release()
         self.assertEqual(kernel.released, [123])
         self.assertEqual(kernel.closed, [123])
@@ -625,6 +814,10 @@ class AdvancedResilienceTests(unittest.TestCase):
                 kernel32=duplicate_kernel,
                 get_last_error=lambda: 183,
             ).acquire()
+        self.assertEqual(
+            duplicate_kernel.created,
+            [(None, True, r"Global\AttackLensAgent")],
+        )
         self.assertEqual(duplicate_kernel.closed, [123])
 
     def test_install_manifest_detects_tamper(self) -> None:
@@ -664,6 +857,60 @@ class AdvancedResilienceTests(unittest.TestCase):
                 return_value=145.9,
             ):
                 self.assertEqual(agent._uptime_seconds(), 45)
+
+    def test_wire_timestamp_applies_manager_clock_correction(self) -> None:
+        with tempfile.TemporaryDirectory() as root:
+            agent = WindowsAgent(_config(root))
+            with mock.patch(
+                "agent.os.windows.win_agent.time.time",
+                return_value=1_000.0,
+            ):
+                agent._manager_clock_skew_sec = 30
+                self.assertEqual(agent._wire_timestamp(), 1_000)
+                agent._manager_clock_skew_sec = 420
+                self.assertEqual(agent._wire_timestamp(), 1_420)
+                agent._manager_clock_skew_sec = -420
+                self.assertEqual(agent._wire_timestamp(), 580)
+
+    def test_wall_clock_jump_is_detected_without_changing_monotonic_schedule(self) -> None:
+        with tempfile.TemporaryDirectory() as root:
+            agent = WindowsAgent(_config(root))
+            agent._clock_anchor_wall = 1_000.0
+            agent._clock_anchor_monotonic = 100.0
+            with mock.patch(
+                "agent.os.windows.win_agent.time.time",
+                return_value=900.0,
+            ), mock.patch(
+                "agent.os.windows.win_agent.time.monotonic",
+                return_value=200.0,
+            ):
+                event = agent._detect_clock_step()
+            self.assertTrue(event["detected"])
+            self.assertEqual(event["step_sec"], -200)
+            self.assertEqual(agent._clock_anchor_monotonic, 200.0)
+
+    def test_pending_delivery_stall_wakes_sender_and_is_rate_limited(self) -> None:
+        with tempfile.TemporaryDirectory() as root:
+            cfg = _config(root)
+            cfg["transport"]["delivery_stall_sec"] = 300
+            agent = WindowsAgent(cfg)
+            agent._started_wall_time = 500.0
+            with mock.patch(
+                "agent.os.windows.win_agent.time.time",
+                return_value=1_000.0,
+            ):
+                self.assertTrue(agent._check_delivery_stall({"pending": 4}))
+                self.assertTrue(agent._send_wake.is_set())
+                self.assertEqual(agent._connection_state, "delivery_stalled")
+                self.assertEqual(
+                    agent._delivery_snapshot()["delivery_stall_detected"],
+                    1,
+                )
+                self.assertTrue(agent._check_delivery_stall({"pending": 4}))
+                self.assertEqual(
+                    agent._delivery_snapshot()["delivery_stall_detected"],
+                    1,
+                )
 
     def test_clean_stop_marker_classifies_previous_exit(self) -> None:
         with tempfile.TemporaryDirectory() as root:
@@ -739,6 +986,8 @@ class AdvancedResilienceTests(unittest.TestCase):
             cfg = _config(root)
             cfg["manager"].update({
                 "proxy_url": "http://proxy.example:8080",
+                "proxy_pac_url": "https://proxy.example/proxy.pac",
+                "proxy_auto_detect": False,
                 "spki_pin": "sha256//test-pin",
             })
             agent = WindowsAgent(cfg)
@@ -754,6 +1003,13 @@ class AdvancedResilienceTests(unittest.TestCase):
             self.assertEqual(
                 transport_class.call_args.kwargs["proxy_url"],
                 "http://proxy.example:8080",
+            )
+            self.assertEqual(
+                transport_class.call_args.kwargs["proxy_pac_url"],
+                "https://proxy.example/proxy.pac",
+            )
+            self.assertFalse(
+                transport_class.call_args.kwargs["proxy_auto_detect"]
             )
             self.assertEqual(
                 transport_class.call_args.kwargs["spki_pin"],

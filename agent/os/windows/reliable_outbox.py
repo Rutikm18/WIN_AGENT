@@ -439,6 +439,30 @@ class ReliableOutbox:
                 ),
             )
 
+    def retain_pending_section_as_dead(
+        self,
+        section: str,
+        *,
+        error: str,
+        status_code: int | None = None,
+    ) -> int:
+        """Open a compatibility circuit without repeatedly calling the manager."""
+        with self._lock:
+            cursor = self._conn.execute(
+                """
+                UPDATE outbox
+                SET state='dead', last_attempt_at=?, last_status=?, last_error=?
+                WHERE state='pending' AND section=?
+                """,
+                (
+                    int(time.time()),
+                    status_code,
+                    error[:512],
+                    section,
+                ),
+            )
+            return max(0, int(cursor.rowcount))
+
     def retry_dead_letters(self) -> int:
         """Move all retained dead letters back to the pending queue."""
         with self._lock:
@@ -450,6 +474,52 @@ class ReliableOutbox:
                 """
             )
             return max(0, int(cursor.rowcount))
+
+    def prune_oldest_dead_letters(
+        self,
+        *,
+        fraction: float = 0.10,
+    ) -> dict[str, int]:
+        """Evict the oldest retained rejections to make room under disk pressure.
+
+        Pending telemetry is deliberately never selected.  The returned count
+        and protected-byte total make this exceptional data loss observable in
+        agent health instead of silently deleting evidence.
+        """
+        fraction = max(0.01, min(1.0, float(fraction)))
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT COUNT(*) AS count FROM outbox WHERE state='dead'"
+            ).fetchone()
+            total = int(row["count"] if row else 0)
+            if total <= 0:
+                return {"rows": 0, "bytes": 0}
+            limit = max(1, int(total * fraction))
+            selected = self._conn.execute(
+                """
+                SELECT id, LENGTH(protected_payload) AS bytes
+                FROM outbox WHERE state='dead' ORDER BY id LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+            ids = [int(entry["id"]) for entry in selected]
+            protected_bytes = sum(int(entry["bytes"] or 0) for entry in selected)
+            placeholders = ",".join("?" for _ in ids)
+            self._conn.execute("BEGIN IMMEDIATE")
+            try:
+                self._conn.execute(
+                    f"DELETE FROM outbox WHERE state='dead' AND id IN ({placeholders})",
+                    ids,
+                )
+                self._conn.execute("COMMIT")
+            except Exception:
+                self._rollback_quietly()
+                raise
+            try:
+                self._conn.execute("PRAGMA wal_checkpoint(PASSIVE)")
+            except sqlite3.Error:
+                pass
+            return {"rows": len(ids), "bytes": protected_bytes}
 
     def seconds_until_next(self, default: float = 30.0) -> float:
         with self._lock:

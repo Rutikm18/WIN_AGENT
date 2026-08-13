@@ -1,6 +1,12 @@
 # AttackLens Agent — Windows Installation Guide
 
-> For service startup diagnosis, safe repair, support bundles, and Docker scenarios, use [`advanced_support/`](advanced_support/README.md).
+> Current package: `pkg\dist\attacklens-agent-2.0.19-x64.msi`. See [CURRENT_IMPLEMENTATION.md](CURRENT_IMPLEMENTATION.md) for its verified hash and gates. Older version commands below are retained as upgrade/incident history; support tooling is in [`advanced_support/`](advanced_support/README.md).
+
+Current silent install with bare-host HTTP/8080 normalization:
+
+```powershell
+msiexec /i "pkg\dist\attacklens-agent-2.0.19-x64.msi" /qn ACCEPT_EULA=1 MANAGER_URL="72.61.228.62" /l*v "$env:TEMP\attacklens-2.0.19-install.log"
+```
 
 ## What the MSI does (fully automatic)
 

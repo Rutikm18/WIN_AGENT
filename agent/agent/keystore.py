@@ -97,15 +97,17 @@ def _key_file_path(security_dir: str, agent_id: str) -> str:
 def _store_key_file(agent_id: str, key_hex: str, security_dir: str) -> None:
     os.makedirs(security_dir, exist_ok=True)
     # Tighten the directory itself
-    try:
-        os.chmod(security_dir, stat.S_IRWXU)   # 0700 — only owner
-    except Exception:
-        pass
+    if os.name != "nt":
+        try:
+            os.chmod(security_dir, stat.S_IRWXU)   # 0700 — only owner
+        except Exception:
+            pass
     path = _key_file_path(security_dir, agent_id)
     tmp  = path + ".tmp"
     with open(tmp, "w") as f:
         f.write(key_hex)
-    os.chmod(tmp, stat.S_IRUSR | stat.S_IWUSR)   # 0600
+    if os.name != "nt":
+        os.chmod(tmp, stat.S_IRUSR | stat.S_IWUSR)   # 0600
     os.replace(tmp, path)                          # atomic rename
     log.info("API key stored in file: %s (mode 0600)", path)
 
@@ -116,7 +118,7 @@ def _load_key_file(agent_id: str, security_dir: str) -> str | None:
         return None
     # Refuse to load a world- or group-readable key file
     mode = os.stat(path).st_mode & 0o777
-    if mode & 0o077:
+    if os.name != "nt" and mode & 0o077:
         log.error(
             "SECURITY: key file %s has unsafe permissions %o — refusing to load. "
             "Fix with: chmod 600 %s", path, mode, path,

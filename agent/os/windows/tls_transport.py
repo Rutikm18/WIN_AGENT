@@ -232,6 +232,8 @@ class WindowsTLSTransport:
         tls_verify: bool | str = True,
         timeout: tuple[int, int] = (15, 30),
         proxy_url: str | None = None,
+        proxy_pac_url: str | None = None,
+        proxy_auto_detect: bool = False,
     ):
         self._base_url = base_url.rstrip("/")
         # Validate timeout: must be a (connect_sec, read_sec) tuple.
@@ -251,10 +253,19 @@ class WindowsTLSTransport:
         # Keep Requests/urllib3 certificate policy aligned with the custom
         # SSLContext. A string is a custom CA bundle path.
         self._session.verify = tls_verify
-        if proxy_url:
+        from agent.os.windows.proxy_resolver import resolve_windows_proxy
+
+        proxy_resolution = resolve_windows_proxy(
+            self._base_url,
+            explicit_proxy=proxy_url,
+            pac_url=proxy_pac_url,
+            auto_detect=proxy_auto_detect,
+        )
+        self.proxy_source = proxy_resolution.source
+        if proxy_resolution.proxy_url:
             self._session.proxies.update({
-                "http": proxy_url,
-                "https": proxy_url,
+                "http": proxy_resolution.proxy_url,
+                "https": proxy_resolution.proxy_url,
             })
         self._session.mount("https://", adapter)
         # Reject plain HTTP (should never be used in production)

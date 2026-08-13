@@ -1,5 +1,7 @@
 # Windows Agent Release-Candidate QA Report
 
+> Latest QA addendum: [CURRENT_IMPLEMENTATION.md](CURRENT_IMPLEMENTATION.md). Build 2.0.19 passed 511 agent/platform tests (7 skipped), 24 manager tests, the 384-test canonical package gate (2 skipped), Defender, WiX, compiled MSI contracts, and the nine-case Docker lab. It remains an unsigned development build.
+
 > The current startup and recovery scenario matrix is maintained in [`advanced_support/FAILURE_MATRIX.md`](advanced_support/FAILURE_MATRIX.md).
 
 Date: 2026-07-27
@@ -269,8 +271,8 @@ WiX MSI validation completes without the ICE03 Target overflow warning.
 
 The release gate also verifies the requested HTTP/8080 manager defaults and
 the packaged editor's Administrator check, staging, installed-binary TOML
-validation, protected backup, atomic replacement, ACL restoration, controlled
-service restart, and rollback path.
+validation, protected backup, an exclusive durable existing-file write that
+preserves the ACL, controlled service restart, and rollback path.
 
 ## 2.0.11 GUI handoff and config-recovery addendum
 

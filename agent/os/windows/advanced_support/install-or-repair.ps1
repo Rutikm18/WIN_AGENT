@@ -1,9 +1,9 @@
 [CmdletBinding()]
 param(
-    [string]$MsiPath = (Join-Path $PSScriptRoot '..\pkg\dist\attacklens-agent-2.0.10-x64.msi'),
+    [string]$MsiPath = (Join-Path $PSScriptRoot '..\pkg\dist\attacklens-agent-2.0.19-x64.msi'),
     [string]$ManagerUrl = '',
     [switch]$AllowInsecureTransport,
-    [string]$LogPath = (Join-Path $env:TEMP 'attacklens-install-2.0.10.log')
+    [string]$LogPath = (Join-Path $env:TEMP 'attacklens-install-2.0.19.log')
 )
 
 $ErrorActionPreference = 'Stop'

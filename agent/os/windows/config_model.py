@@ -27,7 +27,7 @@ SUPPORTED_COLLECTIONS = frozenset({
     "mounts", "battery", "openfiles", "services", "users", "hardware",
     "containers", "storage", "tasks", "apps", "packages", "binaries",
     "sbom", "security", "sysctl", "configs", "sca", "eventlog",
-    "security_audit",
+    "security_audit", "developer_security", "persistence",
 })
 ALLOWED_TOP_LEVEL = frozenset({
     "agent", "manager", "enrollment", "paths", "logging", "collection",
@@ -77,6 +77,8 @@ class ManagerConfig:
     allow_insecure_transport: bool = True
     api_key: str | None = None
     proxy_url: str | None = None
+    proxy_pac_url: str | None = None
+    proxy_auto_detect: bool = True
 
     @property
     def effective_tls_verify(self) -> bool | str:
@@ -114,6 +116,9 @@ class RuntimeConfig:
             manager["api_key"] = self.manager.api_key
         if self.manager.proxy_url:
             manager["proxy_url"] = self.manager.proxy_url
+        if self.manager.proxy_pac_url:
+            manager["proxy_pac_url"] = self.manager.proxy_pac_url
+        manager["proxy_auto_detect"] = self.manager.proxy_auto_detect
         result: dict[str, Any] = {
             "agent": {"id": self.agent.id, "name": self.agent.name},
             "manager": manager,
@@ -266,6 +271,31 @@ def _validate(raw: Mapping[str, Any]) -> RuntimeConfig:
                 or not parsed_proxy.hostname
             ):
                 errors.append("[manager] proxy_url must use http:// or https:// and include a host")
+    proxy_pac_url = manager_raw.get("proxy_pac_url")
+    if proxy_pac_url is not None:
+        if not isinstance(proxy_pac_url, str) or not proxy_pac_url.strip():
+            errors.append("[manager] proxy_pac_url must be a non-empty URL")
+            proxy_pac_url = None
+        else:
+            try:
+                parsed_pac = urlsplit(proxy_pac_url)
+            except ValueError:
+                parsed_pac = None
+            if (
+                parsed_pac is None
+                or parsed_pac.scheme not in {"http", "https"}
+                or not parsed_pac.hostname
+            ):
+                errors.append(
+                    "[manager] proxy_pac_url must use http:// or https:// and include a host"
+                )
+    proxy_auto_detect = _bool(
+        manager_raw,
+        "proxy_auto_detect",
+        "[manager] proxy_auto_detect",
+        errors,
+        default=True,
+    )
 
     paths_raw = _section(raw, "paths", errors)
     paths = default_paths()
@@ -327,6 +357,7 @@ def _validate(raw: Mapping[str, Any]) -> RuntimeConfig:
         "auto_reenroll",
         "min_free_mb",
         "outbox_busy_timeout_ms",
+        "delivery_stall_sec",
     }
     errors.extend(
         f"[transport] unsupported key: {key}"
@@ -392,6 +423,15 @@ def _validate(raw: Mapping[str, Any]) -> RuntimeConfig:
             minimum=100,
             maximum=60000,
         ),
+        "delivery_stall_sec": _int(
+            transport_raw,
+            "delivery_stall_sec",
+            "[transport] delivery_stall_sec",
+            errors,
+            default=300,
+            minimum=60,
+            maximum=86400,
+        ),
     }
     if transport["auto_reenroll"] and not str(enrollment.get("token") or "").strip():
         errors.append(
@@ -419,6 +459,8 @@ def _validate(raw: Mapping[str, Any]) -> RuntimeConfig:
             allow_insecure_transport=allow_http,
             api_key=api_key,
             proxy_url=proxy_url,
+            proxy_pac_url=proxy_pac_url,
+            proxy_auto_detect=proxy_auto_detect,
         ),
         enrollment=enrollment,
         paths=paths,

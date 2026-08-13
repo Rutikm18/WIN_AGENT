@@ -1,5 +1,7 @@
 # Startup and Recovery Failure Matrix
 
+> Updated implementation status: [../CURRENT_IMPLEMENTATION.md](../CURRENT_IMPLEMENTATION.md). Runtime self-defense now adds install-integrity failure, config change/unreadable state, protected ACL drift, and Defender path exclusion evidence.
+
 | Case | Typical evidence | Automatic behavior | Operator action |
 |---|---|---|---|
 | MSI configuration rollback | 1603/1722, `CA_WriteConfig`, Event 1001 with `icacls exit 6` | Corrected installer takes ownership only after normal ACL repair fails, bootstraps SYSTEM, reapplies final ACL, and preserves config | Run support `-Mode Repair`, then install 2.0.9+ with verbose logging |

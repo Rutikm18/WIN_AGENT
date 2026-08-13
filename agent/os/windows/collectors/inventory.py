@@ -32,6 +32,12 @@ import time
 
 import psutil
 
+try:  # Task Scheduler COM is optional on non-Windows test hosts.
+    import pythoncom
+    import win32com.client as win32com_client
+except ImportError:  # pragma: no cover - feature-detected at runtime
+    pythoncom = win32com_client = None
+
 from .base import WinBaseCollector
 
 log = logging.getLogger("agent.windows.collectors.inventory")
@@ -118,87 +124,151 @@ class StorageCollector(WinBaseCollector):
 
 # ── tasks ─────────────────────────────────────────────────────────────────────
 
+_TASK_TRIGGER_NAMES = {
+    0: "event", 1: "time", 2: "daily", 3: "weekly", 4: "monthly",
+    5: "monthly_dow", 6: "idle", 7: "registration", 8: "boot",
+    9: "logon", 11: "session_state", 12: "custom",
+}
+
+
+def _com_items(collection) -> list:
+    if collection is None:
+        return []
+    try:
+        return list(collection)
+    except (TypeError, AttributeError):
+        pass
+    result = []
+    count = int(getattr(collection, "Count", 0) or 0)
+    for index in range(1, count + 1):
+        result.append(collection.Item(index))
+    return result
+
+
+def _com_epoch(value) -> int | None:
+    if value is None:
+        return None
+    try:
+        timestamp = int(value.timestamp())
+        # Task Scheduler represents "never" using its zero/1899 COM date.
+        return timestamp if timestamp > 0 else None
+    except (AttributeError, TypeError, ValueError, OverflowError, OSError):
+        return None
+
+
+def _task_command(definition) -> str | None:
+    commands: list[str] = []
+    try:
+        actions = _com_items(definition.Actions)
+    except Exception:
+        actions = []
+    for action in actions:
+        try:
+            # TASK_ACTION_EXEC = 0. Other action types are intentionally not
+            # coerced from localized COM descriptions.
+            if int(getattr(action, "Type", -1)) != 0:
+                continue
+            executable = str(getattr(action, "Path", "") or "").strip()
+            arguments = str(getattr(action, "Arguments", "") or "").strip()
+            command = f"{executable} {arguments}".strip()
+            if command:
+                commands.append(command)
+        except Exception:
+            continue
+    return " ; ".join(commands) or None
+
+
+def _task_schedule(definition) -> str | None:
+    schedules: list[str] = []
+    try:
+        triggers = _com_items(definition.Triggers)
+    except Exception:
+        triggers = []
+    for trigger in triggers:
+        try:
+            kind = _TASK_TRIGGER_NAMES.get(int(getattr(trigger, "Type", -1)), "unknown")
+            start = str(getattr(trigger, "StartBoundary", "") or "").strip()
+            schedules.append(f"{kind}:{start}" if start else kind)
+        except Exception:
+            continue
+    return " ; ".join(schedules) or None
+
+
+def _native_scheduled_tasks(dispatch=None, com_runtime=None) -> list[dict]:
+    dispatch = dispatch or (win32com_client.Dispatch if win32com_client else None)
+    com_runtime = com_runtime or pythoncom
+    if dispatch is None:
+        raise RuntimeError("Task Scheduler COM support is unavailable")
+
+    initialized = False
+    scheduler = folder = task = definition = principal = None
+    pending: list = []
+    tasks: list = []
+    if com_runtime is not None:
+        com_runtime.CoInitialize()
+        initialized = True
+    try:
+        scheduler = dispatch("Schedule.Service")
+        scheduler.Connect()
+        pending = [scheduler.GetFolder("\\")]
+        visited: set[str] = set()
+        result: list[dict] = []
+        while pending:
+            folder = pending.pop()
+            folder_path = str(getattr(folder, "Path", "") or "")
+            key = folder_path.casefold()
+            if key in visited:
+                continue
+            visited.add(key)
+            try:
+                pending.extend(_com_items(folder.GetFolders(0)))
+            except Exception as exc:
+                log.debug("task folder traversal failed path=%s error=%s", folder_path, exc)
+            try:
+                tasks = _com_items(folder.GetTasks(1))  # TASK_ENUM_HIDDEN
+            except Exception as exc:
+                log.debug("task enumeration failed path=%s error=%s", folder_path, exc)
+                continue
+            for task in tasks:
+                try:
+                    definition = task.Definition
+                    principal = getattr(definition, "Principal", None)
+                    result.append({
+                        "name": str(getattr(task, "Path", "") or getattr(task, "Name", "")),
+                        "type": "schtasks",
+                        "schedule": _task_schedule(definition),
+                        "command": _task_command(definition),
+                        "user": str(getattr(principal, "UserId", "") or "") or None,
+                        "enabled": bool(getattr(task, "Enabled", False)),
+                        "last_run": _com_epoch(getattr(task, "LastRunTime", None)),
+                        "next_run": _com_epoch(getattr(task, "NextRunTime", None)),
+                    })
+                except Exception as exc:
+                    log.debug("task record unavailable folder=%s error=%s", folder_path, exc)
+        return result
+    finally:
+        if initialized:
+            # Release all apartment-bound wrappers before CoUninitialize.
+            # Otherwise pywin32 reports IUnknown release failures when the
+            # collector's worker thread exits.
+            tasks.clear()
+            pending.clear()
+            task = definition = principal = folder = scheduler = None
+            import gc
+            gc.collect()
+            com_runtime.CoUninitialize()
+
+
 class TasksCollector(WinBaseCollector):
     name    = "tasks"
     timeout = 45
 
     def collect(self) -> list:
-        tasks: list[dict] = []
-
-        # Primary: Get-ScheduledTask (Windows 8+ / Server 2012+)
-        ps_out = self._run_ps(
-            "Get-ScheduledTask | "
-            "Select-Object TaskName,TaskPath,State,"
-            "@{N='Execute';E={$_.Actions | Select-Object -First 1 -ExpandProperty Execute}},"
-            "@{N='Arguments';E={$_.Actions | Select-Object -First 1 -ExpandProperty Arguments}},"
-            "@{N='Trigger';E={$_.Triggers | Select-Object -First 1 | ConvertTo-Json -Compress -Depth 2}} "
-            "| ConvertTo-Json -Compress"
-        )
         try:
-            items = json.loads(ps_out.strip() or "[]")
-            if isinstance(items, dict):
-                items = [items]
-            for item in items or []:
-                state   = (item.get("State") or "Unknown").lower()
-                enabled = state in ("ready", "running")
-                cmd     = item.get("Execute") or ""
-                args    = item.get("Arguments") or ""
-                command = (f"{cmd} {args}".strip()) or None
-
-                schedule = None
-                try:
-                    trg = item.get("Trigger")
-                    if trg:
-                        td = json.loads(trg) if isinstance(trg, str) else (trg or {})
-                        # Use StartBoundary or CimClassName as schedule description
-                        schedule = str(
-                            td.get("StartBoundary") or
-                            td.get("CimClass", {}).get("CimClassName") or ""
-                        ) or None
-                except Exception:
-                    pass
-
-                tasks.append({
-                    "name":     (item.get("TaskPath") or "\\") + (item.get("TaskName") or ""),
-                    "type":     "schtasks",
-                    "schedule": schedule,
-                    "command":  command,
-                    "user":     None,
-                    "enabled":  enabled,
-                    "last_run": None,
-                    "next_run": None,
-                })
+            return _native_scheduled_tasks()
         except Exception as exc:
-            log.debug("tasks PS: %s", exc)
-            # CSV fallback — use csv.reader so quoted commas inside fields
-            # (e.g. cmd.exe /c "echo hello, world") are handled correctly.
-            raw = self._run(["schtasks", "/query", "/fo", "CSV", "/v"])
-            try:
-                reader = csv.reader(io.StringIO(raw))
-                rows   = list(reader)
-                if len(rows) >= 2:
-                    header = rows[0]
-                    for row in rows[1:]:
-                        if not any(row):
-                            continue
-                        if len(row) < len(header):
-                            continue
-                        r      = dict(zip(header, row))
-                        status = (r.get("Status") or "").lower()
-                        tasks.append({
-                            "name":     r.get("TaskName", ""),
-                            "type":     "schtasks",
-                            "schedule": r.get("Schedule Type"),
-                            "command":  r.get("Task To Run"),
-                            "user":     r.get("Run As User"),
-                            "enabled":  status not in ("disabled",),
-                            "last_run": None,
-                            "next_run": None,
-                        })
-            except Exception as csv_exc:
-                log.debug("tasks CSV fallback failed: %s", csv_exc)
-
-        return tasks
+            log.debug("Task Scheduler COM collection failed: %s", exc)
+            return []
 
 
 # ── apps ──────────────────────────────────────────────────────────────────────
@@ -222,27 +292,33 @@ class AppsCollector(WinBaseCollector):
         hklm = winreg.HKEY_LOCAL_MACHINE
         hkcu = winreg.HKEY_CURRENT_USER
         UNINSTALL = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall"
-        WOW6432   = r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall"
-
         apps: list[dict] = []
-        seen: set[str]   = set()
+        seen: set[tuple[str, str, str]] = set()
 
-        for hive, path in [
-            (hklm, UNINSTALL),
-            (hklm, WOW6432),
-            (hkcu, UNINSTALL),
+        # Explicit views avoid relying on the bitness of the PyInstaller host.
+        # HKCU can also contain view-specific registrations, so inspect both.
+        for hive, path, view in [
+            (hklm, UNINSTALL, winreg.KEY_WOW64_64KEY),
+            (hklm, UNINSTALL, winreg.KEY_WOW64_32KEY),
+            (hkcu, UNINSTALL, winreg.KEY_WOW64_64KEY),
+            (hkcu, UNINSTALL, winreg.KEY_WOW64_32KEY),
         ]:
-            for key_name in self.reg_enum_keys(hive, path):
+            for key_name in _registry_subkeys(hive, path, view):
                 sub = f"{path}\\{key_name}"
-                name = _rv(hive, sub, "DisplayName")
-                if not name or name in seen:
+                name = _rv(hive, sub, "DisplayName", view)
+                if not name:
                     continue
-                seen.add(name)
-
-                version   = _rv(hive, sub, "DisplayVersion")
-                publisher = _rv(hive, sub, "Publisher")
-                inst_loc  = _rv(hive, sub, "InstallLocation")
-                inst_date = _rv(hive, sub, "InstallDate")
+                version   = _rv(hive, sub, "DisplayVersion", view)
+                publisher = _rv(hive, sub, "Publisher", view)
+                inst_loc  = _rv(hive, sub, "InstallLocation", view)
+                inst_date = _rv(hive, sub, "InstallDate", view)
+                identity = (
+                    str(name).casefold(), str(version or "").casefold(),
+                    str(inst_loc or "").casefold(),
+                )
+                if identity in seen:
+                    continue
+                seen.add(identity)
 
                 installed_at = None
                 if inst_date:
@@ -827,12 +903,29 @@ class SbomCollector(WinBaseCollector):
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 
-def _rv(hive, path: str, name: str):
+def _registry_subkeys(hive, path: str, view_flag: int) -> list[str]:
+    try:
+        import winreg
+        with winreg.OpenKey(hive, path, 0, winreg.KEY_READ | view_flag) as key:
+            result: list[str] = []
+            index = 0
+            while True:
+                try:
+                    result.append(winreg.EnumKey(key, index))
+                    index += 1
+                except OSError:
+                    return result
+    except Exception:
+        return []
+
+
+def _rv(hive, path: str, name: str, view_flag: int | None = None):
     """Read a single registry value; return None on error."""
     try:
         import winreg
-        with winreg.OpenKey(hive, path, 0,
-                            winreg.KEY_READ | winreg.KEY_WOW64_64KEY) as k:
+        if view_flag is None:
+            view_flag = winreg.KEY_WOW64_64KEY
+        with winreg.OpenKey(hive, path, 0, winreg.KEY_READ | view_flag) as k:
             val, _ = winreg.QueryValueEx(k, name)
             return val
     except Exception:

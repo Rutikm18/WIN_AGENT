@@ -320,7 +320,20 @@ def main() -> None:
 
     if len(sys.argv) == 1:
         # No arguments → SCM is starting us as a service
-        servicemanager.Initialize()
+        from agent.os.windows.eventlog_source import (
+            SOURCE_NAME,
+            register_event_source,
+        )
+
+        event_source = register_event_source()
+        if not event_source.get("registered"):
+            log.warning("Windows Event Log source registration failed: %s", event_source)
+        try:
+            import win32evtlog
+
+            servicemanager.Initialize(SOURCE_NAME, win32evtlog.__file__)
+        except TypeError:
+            servicemanager.Initialize()
         servicemanager.PrepareToHostSingle(AttackLensAgentService)
         servicemanager.StartServiceCtrlDispatcher()
     elif len(sys.argv) >= 2 and sys.argv[1].lower() == "debug":

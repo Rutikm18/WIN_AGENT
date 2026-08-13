@@ -1,5 +1,7 @@
 # Windows Developer and AI Security Audit Implementation Plan
 
+> Current implementation and tests: [CURRENT_IMPLEMENTATION.md](CURRENT_IMPLEMENTATION.md). The six-hour security-audit section remains active alongside the new native persistence and streaming telemetry sections.
+
 > Service startup recovery preserves fail-closed ACL, identity, outbox, and TLS controls as documented in [`advanced_support/AUTOMATION.md`](advanced_support/AUTOMATION.md).
 
 Source requirements: `windowsagent_additional_Capabilities.md`

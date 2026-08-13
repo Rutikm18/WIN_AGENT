@@ -50,6 +50,13 @@ SECTION_DEFS: tuple[SectionDef, ...] = (
     SectionDef("security",    "posture",   3600,  "SIP, Gatekeeper, FileVault, Firewall"),
     SectionDef("sysctl",      "posture",   3600,  "Kernel security parameters"),
     SectionDef("configs",     "posture",   3600,  "Shell rc, SSH config, /etc/hosts"),
+    SectionDef("sca",         "posture",   3600,  "Security configuration assessment"),
+    SectionDef("eventlog",    "security",  300,   "Windows Event Log security events"),
+    SectionDef("persistence", "security",  1800,  "Windows persistence inventory and changes"),
+    SectionDef("developer_security", "security", 3600, "Privacy-safe developer and AI attack surface"),
+    SectionDef("security_audit", "security", 21600, "Developer and AI security surface audit"),
+    SectionDef("agent_health", "control",   60,    "Agent health and delivery status"),
+    SectionDef("agent_lifecycle", "control", 60,   "Agent boot and lifecycle events"),
     # ── Software inventory (24 hr) ───────────────────────────────────────
     SectionDef("apps",        "inventory", 86400, "Installed .app bundles"),
     SectionDef("packages",    "inventory", 86400, "brew, pip, npm, gems"),

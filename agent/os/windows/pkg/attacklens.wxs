@@ -421,6 +421,33 @@
       Execute="deferred"
       Impersonate="no"
       Return="check" />
+    <!-- WiX util:ServiceConfig supports one restart delay for all failures.
+         Apply the required graduated 5s/10s/30s agent recovery policy through
+         SCM after service creation, still inside the elevated transaction. -->
+    <CustomAction Id="CA_SetAgentRecoveryActions"
+      Directory="System64Folder"
+      ExeCommand="&quot;[System64Folder]sc.exe&quot; failure AttackLensAgent reset= 86400 actions= restart/5000/restart/10000/restart/30000"
+      Execute="deferred"
+      Impersonate="no"
+      Return="check" />
+    <CustomAction Id="CA_SetAgentDelayedAutoStart"
+      Directory="System64Folder"
+      ExeCommand="&quot;[System64Folder]sc.exe&quot; config AttackLensAgent start= delayed-auto"
+      Execute="deferred"
+      Impersonate="no"
+      Return="check" />
+    <CustomAction Id="CA_SetWatchdogDelayedAutoStart"
+      Directory="System64Folder"
+      ExeCommand="&quot;[System64Folder]sc.exe&quot; config AttackLensWatchdog start= delayed-auto"
+      Execute="deferred"
+      Impersonate="no"
+      Return="check" />
+    <CustomAction Id="CA_SetAgentFailureFlag"
+      Directory="System64Folder"
+      ExeCommand="&quot;[System64Folder]sc.exe&quot; failureflag AttackLensAgent 1"
+      Execute="deferred"
+      Impersonate="no"
+      Return="check" />
 
     <InstallUISequence>
       <!-- Capture final dialog values before ExecuteAction switches from the
@@ -436,6 +463,16 @@
       <Custom Action="CA_SetAgentServiceSid" After="InstallServices"
               Condition="NOT Installed OR REINSTALL" />
       <Custom Action="CA_SetWatchdogServiceSid" After="CA_SetAgentServiceSid"
+              Condition="NOT Installed OR REINSTALL" />
+      <!-- Must run after MsiConfigureServices, otherwise the ServiceConfig
+           table overwrites the graduated delays with its uniform fallback. -->
+      <Custom Action="CA_SetAgentDelayedAutoStart" After="MsiConfigureServices"
+              Condition="NOT Installed OR REINSTALL" />
+      <Custom Action="CA_SetWatchdogDelayedAutoStart" After="CA_SetAgentDelayedAutoStart"
+              Condition="NOT Installed OR REINSTALL" />
+      <Custom Action="CA_SetAgentRecoveryActions" After="CA_SetWatchdogDelayedAutoStart"
+              Condition="NOT Installed OR REINSTALL" />
+      <Custom Action="CA_SetAgentFailureFlag" After="CA_SetAgentRecoveryActions"
               Condition="NOT Installed OR REINSTALL" />
       <Custom Action="CA_PurgeState" Before="RemoveFiles"
               Condition="REMOVE~=&quot;ALL&quot; AND PURGE_ON_UNINSTALL=&quot;1&quot;" />

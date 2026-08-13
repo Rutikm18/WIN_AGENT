@@ -45,10 +45,10 @@ if sys.platform == "darwin":
     _DEFAULT_SECURITY  = "/Library/Jarvis/security"
     _DEFAULT_CONFIG    = "/Library/Jarvis/agent.toml"
 elif sys.platform == "win32":
-    _DEFAULT_LOG_FILE  = r"C:\Program Files (x86)\Jarvis\logs\agent.log"
-    _DEFAULT_SPOOL_DIR = r"C:\Program Files (x86)\Jarvis\spool"
-    _DEFAULT_SECURITY  = r"C:\Program Files (x86)\Jarvis\security"
-    _DEFAULT_CONFIG    = r"C:\Program Files (x86)\Jarvis\config\agent.toml"
+    _DEFAULT_LOG_FILE  = r"C:\ProgramData\AttackLens\logs\agent.log"
+    _DEFAULT_SPOOL_DIR = r"C:\ProgramData\AttackLens\spool"
+    _DEFAULT_SECURITY  = r"C:\Program Files (x86)\AttackLens\security"
+    _DEFAULT_CONFIG    = r"C:\Program Files (x86)\AttackLens\config\agent.toml"
 else:
     _DEFAULT_LOG_FILE  = "/var/log/jarvis/agent.log"
     _DEFAULT_SPOOL_DIR = "/var/lib/jarvis/spool"
@@ -79,6 +79,7 @@ _DEFAULT_SECTIONS: dict = {
     "packages":    {"enabled": True,  "interval_sec": 86400, "send": True},
     "binaries":    {"enabled": False, "interval_sec": 86400, "send": False},
     "sbom":        {"enabled": True,  "interval_sec": 86400, "send": True},
+    "sca":         {"enabled": True,  "interval_sec": 43200, "send": True},
 }
 
 # ── OS-aware collector + normalizer loading ───────────────────────────────────

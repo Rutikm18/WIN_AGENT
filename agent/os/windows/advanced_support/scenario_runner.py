@@ -19,6 +19,7 @@ from agent.os.windows.startup_recovery import (
     diagnose_startup,
     safe_repair,
 )
+from agent.os.windows.self_defense import audit_self_defense
 
 
 VALID_CONFIG = r'''
@@ -118,6 +119,77 @@ def run_all() -> dict:
                     "1067": "process_terminated", "1068": "dependency_failure",
                 },
                 "classifications": classifications,
+            }
+
+            class AclResult:
+                def __init__(self, compliant: bool):
+                    self.policy = "config_file"
+                    self.compliant = compliant
+                    self.skipped = False
+                    self.error = None
+
+            acl_calls: list[bool] = []
+
+            def acl_check(_paths, *, repair):
+                acl_calls.append(bool(repair))
+                return [AclResult(False)]
+
+            def acl_repair(_paths, *, repair):
+                acl_calls.append(bool(repair))
+                return [AclResult(True)]
+
+            self_defense = audit_self_defense(
+                {},
+                config_path=None,
+                config_digest=None,
+                integrity_fn=lambda: {"status": "verified", "checked_files": 2},
+                acl_check_fn=acl_check,
+                acl_repair_fn=acl_repair,
+                defender_fn=lambda _paths: {
+                    "supported": True,
+                    "protected_path_excluded": True,
+                },
+            )
+            results["self_defense_acl_and_defender"] = {
+                "passed": (
+                    acl_calls == [False, True]
+                    and "config_file" in self_defense["repaired"]
+                    and {item["code"] for item in self_defense["alerts"]}
+                    == {"acl_drift_repaired", "agent_path_excluded_from_defender"}
+                ),
+                "alerts": self_defense["alerts"],
+            }
+
+            def integrity_failure():
+                raise RuntimeError("checksum mismatch")
+
+            integrity = audit_self_defense(
+                {},
+                config_path=None,
+                config_digest=None,
+                integrity_fn=integrity_failure,
+                acl_check_fn=lambda _paths, repair: [],
+                defender_fn=lambda _paths: {
+                    "supported": True,
+                    "protected_path_excluded": False,
+                },
+            )
+            results["binary_integrity_stop_condition"] = {
+                "passed": (
+                    integrity["ok"] is False
+                    and any(
+                        item["code"] == "install_integrity_failed"
+                        and item["severity"] == "critical"
+                        for item in integrity["alerts"]
+                    )
+                ),
+                "alerts": integrity["alerts"],
+            }
+
+            results["disk_pressure_classification"] = {
+                "passed": classify_startup_error(
+                    OSError("No space left on device")
+                )["code"] == "disk_pressure",
             }
 
             db = Path("healthy.sqlite3")

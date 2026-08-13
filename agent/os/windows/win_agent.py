@@ -58,6 +58,7 @@ CLI (foreground / debug)
 from __future__ import annotations
 
 import base64
+import errno
 import hashlib
 import json
 import logging
@@ -89,6 +90,8 @@ _INTERVALS: dict[str, int] = {
     "security":   3600,  "sysctl":   3600,   "configs":   3600,
     "sca":        3600,
     "eventlog":    300,
+    "persistence": 1800,
+    "developer_security": 3600,
     "security_audit": 21600,
 }
 
@@ -96,6 +99,7 @@ _HEALTH_INTERVAL = 60    # seconds between agent_health heartbeats
 _QUEUE_MAXSIZE   = 512   # drop-oldest-to-spool above this depth
 _SEND_TIMEOUT    = 30    # seconds per POST to manager
 _SPOOL_PROBE_SEC = 30    # seconds between /health probes when queue is quiet
+_UNSUPPORTED_SECTION_PROBE_SEC = 3600
 # Keep a margin below the manager's 10 MiB request limit for JSON/envelope
 # overhead and future reverse-proxy limits.
 _MAX_ENVELOPE_BYTES = 9 * 1024 * 1024
@@ -359,6 +363,17 @@ class WindowsAgent:
         self._agent_number = ""
         self._stop_ev      = threading.Event()
         self._started_monotonic = time.monotonic()
+        self._started_wall_time = time.time()
+        self._clock_anchor_monotonic = self._started_monotonic
+        self._clock_anchor_wall = self._started_wall_time
+        self._clock_step: dict[str, Any] = {
+            "detected": False,
+            "step_sec": 0,
+            "detected_at": None,
+        }
+        self._last_delivery_stall_alert_at = 0.0
+        self._unsupported_sections: dict[str, float] = {}
+        self._compatibility_lock = threading.Lock()
         self._send_q: queue.Queue[bytes] = queue.Queue(maxsize=_QUEUE_MAXSIZE)
         self._breakers:   dict[str, _CircuitBreaker] = {}
         self._collectors: dict[str, Any]             = {}
@@ -384,6 +399,12 @@ class WindowsAgent:
             "checked_files": 0,
         }
         self._previous_lifecycle: dict[str, Any] = {}
+        self._boot_state_tracker: Any = None
+        self._boot_transition: dict[str, Any] = {}
+        self._service_policy: dict[str, Any] = {}
+        self._self_defense_status: dict[str, Any] = {"status": "not_checked"}
+        self._last_self_defense_alerts: str = ""
+        self._last_integrity_check_monotonic = self._started_monotonic
         self._stats_lock = threading.Lock()
         self._delivery_stats: dict[str, Any] = {
             "sent": 0,
@@ -405,6 +426,13 @@ class WindowsAgent:
             "auth_failures": 0,
             "duplicate_acks": 0,
             "oversize_preserved": 0,
+            "disk_pressure_events": 0,
+            "disk_pressure_evicted_dead_letters": 0,
+            "disk_pressure_evicted_bytes": 0,
+            "disk_pressure_deferred": 0,
+            "delivery_stall_detected": 0,
+            "unsupported_section_rejections": 0,
+            "unsupported_section_suppressed": 0,
         }
         # Active sections: section_name → interval_sec (built from config + defaults)
         self._active_intervals: dict[str, int] = self._build_active_intervals()
@@ -512,6 +540,37 @@ class WindowsAgent:
                 raise
             raise AgentStartupError("ACL initialization failed") from exc
 
+        # Record the boot identity before any network work and repair SCM
+        # persistence drift while running as LocalSystem. An audit failure is
+        # degraded health evidence, never a reason to stop collecting.
+        try:
+            from agent.os.windows.boot_persistence import (
+                BootStateTracker,
+                enforce_service_policy,
+            )
+
+            self._boot_state_tracker = BootStateTracker(
+                Path(self._path("data_dir")) / "boot_state.json"
+            )
+            self._boot_transition = self._boot_state_tracker.begin_start()
+            self._service_policy = enforce_service_policy(repair=True)
+            if self._service_policy.get("repaired"):
+                log.warning(
+                    "Repaired AttackLensAgent SCM persistence drift: %s",
+                    ", ".join(self._service_policy["repaired"]),
+                )
+            elif self._service_policy.get("error"):
+                log.warning(
+                    "SCM persistence audit unavailable: %s",
+                    self._service_policy["error"],
+                )
+        except Exception as exc:
+            self._service_policy = {
+                "compliant": False,
+                "error": f"{type(exc).__name__}: {exc}",
+            }
+            log.warning("boot persistence initialization failed: %s", exc)
+
         # Phase 3 — opportunistic enrollment. Manager configuration and
         # availability are optional: failures leave the agent in encrypted
         # offline-spool mode and the sender retries enrollment in background.
@@ -562,6 +621,20 @@ class WindowsAgent:
                         **self._previous_lifecycle,
                     },
                 )
+            if self._boot_transition.get("boot_changed"):
+                self._queue_collected_data(
+                    "agent_lifecycle",
+                    {"event": "system_boot", **self._boot_transition},
+                )
+            if self._service_policy.get("repaired"):
+                self._queue_collected_data(
+                    "agent_lifecycle",
+                    {
+                        "event": "service_persistence_repaired",
+                        "service": "AttackLensAgent",
+                        "repaired": list(self._service_policy["repaired"]),
+                    },
+                )
         except Exception as exc:
             log.critical(
                 "Agent cannot start — spool init failed at %s: %s\n"
@@ -571,6 +644,7 @@ class WindowsAgent:
             raise AgentStartupError("delivery outbox initialization failed") from exc
 
         self._notify_progress(progress_callback, 5)
+        self._start_streaming_collectors()
         self._publish_runtime_state("running")
         if ready_callback is not None:
             try:
@@ -601,6 +675,14 @@ class WindowsAgent:
         threads.append(hb_t)
         hb_t.start()
 
+        persistence_t = threading.Thread(
+            target=self._boot_persistence_loop,
+            daemon=True,
+            name="win-persistence",
+        )
+        threads.append(persistence_t)
+        persistence_t.start()
+
         log.info("Agent running: %d collector threads + sender + heartbeat  (disabled=%d)",
                  len(self._active_intervals),
                  len(_INTERVALS) - len(self._active_intervals))
@@ -616,16 +698,19 @@ class WindowsAgent:
         # Let in-flight collectors finish their enqueue/cursor transaction.
         collector_deadline = time.monotonic() + 15.0
         for thread in threads:
-            if thread in {sender_t, hb_t}:
+            if thread in {sender_t, hb_t, persistence_t}:
                 continue
             remaining = collector_deadline - time.monotonic()
             if remaining <= 0:
                 break
             thread.join(timeout=remaining)
 
+        self._stop_streaming_collectors()
+
         # The sender never owns the only copy; pending rows remain in SQLite.
         sender_t.join(timeout=15)
         hb_t.join(timeout=2)
+        persistence_t.join(timeout=2)
         self._publish_runtime_state("stopped")
         live_collectors = [
             thread.name
@@ -643,6 +728,11 @@ class WindowsAgent:
                 ", ".join(live_collectors),
             )
         if not self._fatal_runtime_error:
+            if self._boot_state_tracker is not None:
+                try:
+                    self._boot_state_tracker.mark_clean_stop(self._stop_reason)
+                except Exception as exc:
+                    log.warning("boot-state clean-stop write failed: %s", exc)
             self._write_clean_stop_marker()
         if self._instance_guard is not None:
             try:
@@ -675,6 +765,85 @@ class WindowsAgent:
                     )
                 except Exception as exc:
                     log.warning("power resume event enqueue failed: %s", exc)
+
+    def _boot_persistence_loop(self) -> None:
+        """Reassert SCM/ACL policy and audit tamper state every five minutes."""
+        from agent.os.windows.boot_persistence import (
+            REPAIR_INTERVAL_SEC,
+            enforce_service_policy,
+        )
+        from agent.os.windows.self_defense import (
+            INTEGRITY_RECHECK_SEC,
+            audit_self_defense,
+        )
+
+        while not self._stop_ev.wait(REPAIR_INTERVAL_SEC):
+            try:
+                report = enforce_service_policy(repair=True)
+                self._service_policy = report
+                repaired = list(report.get("repaired") or [])
+                if repaired:
+                    log.warning(
+                        "Self-repaired AttackLensAgent SCM persistence drift: %s",
+                        ", ".join(repaired),
+                    )
+                    if self._outbox is not None:
+                        self._queue_collected_data(
+                            "agent_lifecycle",
+                            {
+                                "event": "service_persistence_repaired",
+                                "service": "AttackLensAgent",
+                                "repaired": repaired,
+                            },
+                        )
+            except Exception as exc:
+                log.warning("SCM persistence self-repair failed: %s", exc)
+            try:
+                now = time.monotonic()
+                verify_integrity = (
+                    now - self._last_integrity_check_monotonic
+                    >= INTEGRITY_RECHECK_SEC
+                )
+                acl_paths = dict(self._cfg.get("paths", {}))
+                if self._config_path:
+                    acl_paths["config_file"] = self._config_path
+                acl_paths.update(self._cfg.get("acl", {}))
+                manifest = str(self._integrity_status.get("manifest") or "")
+                acl_paths["install_dir"] = str(
+                    Path(manifest).parent if manifest else Path(sys.executable).parent
+                )
+                audit = audit_self_defense(
+                    acl_paths,
+                    config_path=self._config_path,
+                    config_digest=self._config_digest,
+                    verify_integrity=verify_integrity,
+                )
+                if verify_integrity:
+                    self._last_integrity_check_monotonic = now
+                    if audit.get("install_integrity"):
+                        self._integrity_status = dict(audit["install_integrity"])
+                self._self_defense_status = audit
+                alerts = list(audit.get("alerts") or [])
+                alert_digest = json.dumps(alerts, sort_keys=True, separators=(",", ":"))
+                # Send a transition once. Persistent drift remains visible in
+                # every agent_health record without generating alert storms.
+                if alerts and alert_digest != self._last_self_defense_alerts:
+                    log.warning(
+                        "Self-defense audit reported: %s",
+                        ", ".join(str(item.get("code")) for item in alerts),
+                    )
+                    if self._outbox is not None:
+                        self._queue_collected_data(
+                            "agent_lifecycle",
+                            {"event": "self_defense_alert", "alerts": alerts},
+                        )
+                self._last_self_defense_alerts = alert_digest
+            except Exception as exc:
+                self._self_defense_status = {
+                    "ok": False,
+                    "error": f"{type(exc).__name__}: {exc}",
+                }
+                log.warning("self-defense audit failed: %s", exc)
 
     @staticmethod
     def _notify_progress(callback: Any, checkpoint: int) -> None:
@@ -821,6 +990,8 @@ class WindowsAgent:
             tls_verify=manager.get("ca_bundle") or manager.get("tls_verify", True),
             timeout=(min(15, timeout), timeout),
             proxy_url=manager.get("proxy_url") or None,
+            proxy_pac_url=manager.get("proxy_pac_url") or None,
+            proxy_auto_detect=bool(manager.get("proxy_auto_detect", True)),
         )
         headers = {"Content-Type": "application/json"}
         if token:
@@ -934,6 +1105,8 @@ class WindowsAgent:
         from agent.os.windows.collectors.sca       import ScaCollector
         from agent.os.windows.collectors.eventlog  import EventLogCollector
         from agent.os.windows.collectors.security_audit import WindowsSecurityAuditCollector
+        from agent.os.windows.collectors.developer_security import WinDeveloperSecurityCollector
+        from agent.os.windows.collectors.persistence import PersistenceCollector
 
         all_collectors = [
             MetricsCollector(),     ConnectionsCollector(),  ProcessesCollector(),
@@ -945,11 +1118,34 @@ class WindowsAgent:
             AppsCollector(),        PackagesCollector(),     BinariesCollector(),
             SbomCollector(),        ScaCollector(state_dir=self._path("data_dir")),
             EventLogCollector(state_dir=self._path("data_dir")),
+            PersistenceCollector(state_dir=self._path("data_dir")),
+            WinDeveloperSecurityCollector(),
             WindowsSecurityAuditCollector(),
         ]
         for c in all_collectors:
             self._collectors[c.name] = c
             self._breakers[c.name]   = _CircuitBreaker(c.name)
+
+    def _start_streaming_collectors(self) -> None:
+        for section, collector in self._collectors.items():
+            if section not in self._active_intervals:
+                continue
+            start = getattr(collector, "start_stream", None)
+            if callable(start):
+                try:
+                    if not start():
+                        log.warning("native telemetry stream unavailable section=%s", section)
+                except Exception as exc:
+                    log.warning("native telemetry stream start failed section=%s error=%s", section, exc)
+
+    def _stop_streaming_collectors(self) -> None:
+        for section, collector in self._collectors.items():
+            stop = getattr(collector, "stop_stream", None)
+            if callable(stop):
+                try:
+                    stop()
+                except Exception as exc:
+                    log.warning("native telemetry stream stop failed section=%s error=%s", section, exc)
 
     # ── Collection loop ───────────────────────────────────────────────────────
 
@@ -981,7 +1177,10 @@ class WindowsAgent:
             try:
                 raw      = collector()
                 data     = normalize(section, raw)
-                self._queue_collected_data(section, data)
+                if not self._queue_collected_data(section, data):
+                    self._rollback_collector(collector)
+                    next_run = time.monotonic() + interval
+                    continue
                 try:
                     commit = getattr(collector, "commit", None)
                     if callable(commit):
@@ -1075,7 +1274,7 @@ class WindowsAgent:
         # Enrich them when they are eventually transmitted after enrollment.
         if not wire_message.get("agent_number"):
             wire_message["agent_number"] = self._agent_number
-        timestamp = int(time.time())
+        timestamp = self._wire_timestamp()
         envelope = encrypt(
             wire_message,
             enc_key,
@@ -1169,30 +1368,75 @@ class WindowsAgent:
                 candidate["chunk_count"] = len(ready)
         return ready, None
 
-    def _queue_collected_data(self, section: str, data: Any) -> None:
+    def _queue_collected_data(self, section: str, data: Any) -> bool:
         """Durably persist data before a collector cursor is committed."""
         if self._outbox is None:
             raise RuntimeError("delivery outbox is not initialized")
+
+        now = time.time()
+        with self._compatibility_lock:
+            rejected_at = self._unsupported_sections.get(section)
+            if (
+                rejected_at is not None
+                and now - rejected_at < _UNSUPPORTED_SECTION_PROBE_SEC
+            ):
+                self._record_delivery("unsupported_section_suppressed")
+                return False
+            if rejected_at is not None:
+                # Permit one hourly compatibility probe. A further manager 422
+                # closes the circuit again; an ACK clears it permanently.
+                self._unsupported_sections.pop(section, None)
 
         transport_cfg = self._cfg.get("transport", {})
         min_free_mb = int(transport_cfg.get("min_free_mb", 128))
         free_mb = shutil.disk_usage(self._path("spool_dir")).free // (1024 * 1024)
         if free_mb < min_free_mb:
             self._connection_state = "disk_pressure"
-            raise RuntimeError(
-                f"outbox disk free space is {free_mb} MiB; "
-                f"minimum is {min_free_mb} MiB"
+            self._record_delivery("disk_pressure_events")
+            reclaimed = self._outbox.prune_oldest_dead_letters(fraction=0.10)
+            self._record_delivery(
+                "disk_pressure_evicted_dead_letters",
+                int(reclaimed["rows"]),
+            )
+            self._record_delivery(
+                "disk_pressure_evicted_bytes",
+                int(reclaimed["bytes"]),
+            )
+            if not reclaimed["rows"]:
+                self._record_delivery("disk_pressure_deferred")
+                log.error(
+                    "collection deferred by disk pressure section=%s free_mb=%d minimum_mb=%d; "
+                    "pending telemetry was preserved",
+                    section,
+                    free_mb,
+                    min_free_mb,
+                )
+                return False
+            log.warning(
+                "disk pressure evicted %d oldest dead letters (%d protected bytes); "
+                "pending telemetry was preserved",
+                reclaimed["rows"],
+                reclaimed["bytes"],
             )
 
         messages, retained_error = self._prepare_messages(
             self._new_message(section, data)
         )
         if retained_error:
-            self._outbox.enqueue_many(
-                messages,
-                state="dead",
-                error=retained_error,
-            )
+            try:
+                self._outbox.enqueue_many(
+                    messages,
+                    state="dead",
+                    error=retained_error,
+                )
+            except Exception as exc:
+                if self._is_disk_full_error(exc):
+                    self._record_delivery("disk_pressure_events")
+                    self._record_delivery("disk_pressure_deferred")
+                    self._connection_state = "disk_pressure"
+                    log.error("dead-letter enqueue deferred by full disk: %s", exc)
+                    return False
+                raise
             self._record_delivery("dead_lettered", len(messages))
             self._record_delivery("oversize_preserved", len(messages))
             log.error(
@@ -1201,9 +1445,32 @@ class WindowsAgent:
                 retained_error,
             )
         else:
-            self._outbox.enqueue_many(messages)
+            try:
+                self._outbox.enqueue_many(messages)
+            except Exception as exc:
+                if self._is_disk_full_error(exc):
+                    self._record_delivery("disk_pressure_events")
+                    self._record_delivery("disk_pressure_deferred")
+                    self._connection_state = "disk_pressure"
+                    log.error(
+                        "collection deferred because SQLite reported a full disk; "
+                        "section=%s pending telemetry remains preserved: %s",
+                        section,
+                        exc,
+                    )
+                    return False
+                raise
             self._record_delivery("durably_queued", len(messages))
         self._send_wake.set()
+        return True
+
+    @staticmethod
+    def _is_disk_full_error(exc: BaseException) -> bool:
+        return (
+            getattr(exc, "errno", None) in {errno.ENOSPC, 112}
+            or "disk is full" in str(exc).lower()
+            or "no space left" in str(exc).lower()
+        )
 
     @staticmethod
     def _rollback_collector(collector: Any) -> None:
@@ -1233,6 +1500,8 @@ class WindowsAgent:
                             )
                         collector_health[section] = section_health
                 outbox_stats = self._outbox.stats() if self._outbox else {}
+                clock_step = self._detect_clock_step()
+                delivery_stalled = self._check_delivery_stall(outbox_stats)
                 health = {
                     "agent_uptime_sec": self._uptime_seconds(),
                     "connection_state": self._connection_state,
@@ -1250,12 +1519,20 @@ class WindowsAgent:
                     "outbox": outbox_stats,
                     "delivery": self._delivery_snapshot(),
                     "manager_clock_skew_sec": self._manager_clock_skew_sec,
+                    "local_clock_step": clock_step,
+                    "delivery_stalled": delivery_stalled,
                     "collectors": collector_health,
                     "integrity": dict(self._integrity_status),
                     "config_integrity": self._config_integrity_snapshot(),
                     "previous_lifecycle": dict(self._previous_lifecycle),
+                    "boot_transition": dict(self._boot_transition),
+                    "service_persistence": dict(self._service_policy),
+                    "self_defense": dict(self._self_defense_status),
+                    "unsupported_sections": self._unsupported_section_snapshot(),
                     "power_events": list(self._power_events[-8:]),
                 }
+                if self._boot_state_tracker is not None:
+                    self._boot_state_tracker.touch()
                 self._publish_runtime_state("running", health)
                 self._queue_collected_data("agent_health", health)
             except Exception as exc:
@@ -1270,6 +1547,66 @@ class WindowsAgent:
     def _uptime_seconds(self) -> int:
         """Return process uptime using a clock unaffected by wall-clock jumps."""
         return max(0, int(time.monotonic() - self._started_monotonic))
+
+    def _wire_timestamp(self) -> int:
+        """Use trusted manager Date skew to recover from a bad endpoint clock."""
+        skew = int(self._manager_clock_skew_sec or 0)
+        correction = skew if abs(skew) > 60 else 0
+        return int(time.time() + correction)
+
+    def _detect_clock_step(self) -> dict[str, Any]:
+        """Detect wall-clock jumps while keeping monotonic scheduling intact."""
+        now_wall = time.time()
+        now_monotonic = time.monotonic()
+        expected_wall = self._clock_anchor_wall + (
+            now_monotonic - self._clock_anchor_monotonic
+        )
+        step = int(now_wall - expected_wall)
+        if abs(step) > 60:
+            self._clock_step = {
+                "detected": True,
+                "step_sec": step,
+                "detected_at": int(now_wall),
+            }
+            # Re-seed the comparison only. Collector schedules already use the
+            # monotonic clock and therefore require no destructive reset.
+            self._clock_anchor_wall = now_wall
+            self._clock_anchor_monotonic = now_monotonic
+            log.warning("local wall clock stepped by %d seconds", step)
+        return dict(self._clock_step)
+
+    def _check_delivery_stall(self, outbox_stats: dict[str, Any]) -> bool:
+        """Wake delivery and surface an alive-but-not-shipping condition."""
+        if int(outbox_stats.get("pending") or 0) <= 0:
+            return False
+        now = time.time()
+        delivery = self._delivery_snapshot()
+        reference = float(delivery.get("last_success_at") or self._started_wall_time)
+        threshold = int(
+            self._cfg.get("transport", {}).get("delivery_stall_sec", 300)
+        )
+        if now - reference < threshold:
+            return False
+        if now - self._last_delivery_stall_alert_at >= threshold:
+            self._last_delivery_stall_alert_at = now
+            self._record_delivery("delivery_stall_detected")
+            self._send_wake.set()
+            if self._connection_state in {"healthy", "starting", "resuming"}:
+                self._connection_state = "delivery_stalled"
+            log.warning(
+                "delivery stalled pending=%s last_success_at=%s; sender reprobe requested",
+                outbox_stats.get("pending"),
+                delivery.get("last_success_at"),
+            )
+        return True
+
+    def _unsupported_section_snapshot(self) -> dict[str, int]:
+        now = time.time()
+        with self._compatibility_lock:
+            return {
+                section: max(0, int(now - rejected_at))
+                for section, rejected_at in self._unsupported_sections.items()
+            }
 
     def _publish_runtime_state(
         self,
@@ -1759,6 +2096,10 @@ class WindowsAgent:
                                 ),
                             ),
                             proxy_url=manager_cfg.get("proxy_url") or None,
+                            proxy_pac_url=manager_cfg.get("proxy_pac_url") or None,
+                            proxy_auto_detect=bool(
+                                manager_cfg.get("proxy_auto_detect", True)
+                            ),
                         )
                         transport_backoff = initial_backoff
                     except Exception as exc:
@@ -1818,6 +2159,8 @@ class WindowsAgent:
 
                 if action == "ack":
                     self._outbox.acknowledge(item)
+                    with self._compatibility_lock:
+                        self._unsupported_sections.pop(item.section, None)
                     self._record_delivery("acknowledged")
                     self._record_delivery("sent")
                     if reason == "duplicate_nonce_ack":
@@ -1841,6 +2184,31 @@ class WindowsAgent:
                         status_code=status,
                     )
                     self._record_delivery("dead_lettered")
+                    if (
+                        status == 422
+                        and "unsupported telemetry section" in reason.lower()
+                    ):
+                        additionally_retained = (
+                            self._outbox.retain_pending_section_as_dead(
+                                item.section,
+                                error="manager_section_unsupported",
+                                status_code=422,
+                            )
+                        )
+                        if additionally_retained:
+                            self._record_delivery(
+                                "dead_lettered",
+                                additionally_retained,
+                            )
+                        with self._compatibility_lock:
+                            self._unsupported_sections[item.section] = time.time()
+                        self._record_delivery("unsupported_section_rejections")
+                        log.error(
+                            "manager does not support telemetry section=%s; "
+                            "retained payload and opened compatibility circuit for %ds",
+                            item.section,
+                            _UNSUPPORTED_SECTION_PROBE_SEC,
+                        )
                     self._connection_state = "manager_rejected_payload"
                     continue
 
@@ -1919,6 +2287,8 @@ class WindowsAgent:
                     max(1, int(mgr_cfg.get("timeout_sec", _SEND_TIMEOUT))),
                 ),
                 proxy_url  = mgr_cfg.get("proxy_url") or None,
+                proxy_pac_url = mgr_cfg.get("proxy_pac_url") or None,
+                proxy_auto_detect = bool(mgr_cfg.get("proxy_auto_detect", True)),
             )
         except Exception as exc:
             log.critical(

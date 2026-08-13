@@ -147,6 +147,32 @@ foreach ($service in @($agentService[0], $watchdogService[0])) {
     if (-not [string]::IsNullOrWhiteSpace([string] $service.C2)) {
         throw "Service $($service.C1) must not have SCM dependencies; found '$($service.C2)'."
     }
+    if ([int] $service.C3 -ne 2) {
+        throw "Service $($service.C1) must compile as automatic start; found StartType=$($service.C3)."
+    }
+}
+
+$serviceRegistryRows = @(Invoke-MsiQuery -Sql (
+    "SELECT ``Root``,``Key``,``Name``,``Value`` FROM ``Registry`` " +
+    "WHERE ``Name``='DelayedAutostart' OR ``Name``='PreshutdownTimeout'"
+) -ColumnCount 4)
+foreach ($serviceName in @('AttackLensAgent', 'AttackLensWatchdog')) {
+    $serviceKey = "SYSTEM\CurrentControlSet\Services\$serviceName"
+    $delayedRows = @($serviceRegistryRows | Where-Object {
+        [int] $_.C1 -eq 2 -and $_.C2 -eq $serviceKey -and
+        $_.C3 -eq 'DelayedAutostart' -and $_.C4 -eq '#1'
+    })
+    if ($delayedRows.Count -ne 1) {
+        throw "Compiled MSI must enable delayed auto-start once for $serviceName."
+    }
+}
+$preshutdownRows = @($serviceRegistryRows | Where-Object {
+    [int] $_.C1 -eq 2 -and
+    $_.C2 -eq 'SYSTEM\CurrentControlSet\Services\AttackLensAgent' -and
+    $_.C3 -eq 'PreshutdownTimeout' -and $_.C4 -eq '#180000'
+})
+if ($preshutdownRows.Count -ne 1) {
+    throw 'Compiled MSI must grant AttackLensAgent a 180-second preshutdown timeout.'
 }
 
 $customActionRows = @(Invoke-MsiQuery -Sql (
@@ -205,6 +231,78 @@ if (-not ([string]$writeConfig.C3).Contains(
 }
 if ((([int]$writeConfig.C4) -band 0x2000) -eq 0) {
     throw 'CA_WriteConfig must hide its target because it can contain an enrollment token.'
+}
+$agentRecovery = @($customActionRows | Where-Object {
+    $_.C1 -eq 'CA_SetAgentRecoveryActions'
+})
+if ($agentRecovery.Count -ne 1) {
+    throw 'Compiled MSI must configure graduated agent recovery actions exactly once.'
+}
+$agentRecoveryTarget = [string] $agentRecovery[0].C3
+foreach ($requiredFragment in @(
+    'failure AttackLensAgent',
+    'reset= 86400',
+    'actions= restart/5000/restart/10000/restart/30000'
+)) {
+    if (-not $agentRecoveryTarget.Contains($requiredFragment)) {
+        throw "Compiled agent recovery action is missing: $requiredFragment"
+    }
+}
+$agentFailureFlag = @($customActionRows | Where-Object {
+    $_.C1 -eq 'CA_SetAgentFailureFlag'
+})
+if ($agentFailureFlag.Count -ne 1 -or
+        -not ([string] $agentFailureFlag[0].C3).Contains(
+            'failureflag AttackLensAgent 1')) {
+    throw 'Compiled MSI must apply agent recovery actions to non-crash failures.'
+}
+foreach ($serviceName in @('Agent', 'Watchdog')) {
+    $actionName = "CA_Set${serviceName}DelayedAutoStart"
+    $serviceScmName = if ($serviceName -eq 'Agent') {
+        'AttackLensAgent'
+    } else {
+        'AttackLensWatchdog'
+    }
+    $delayedAction = @($customActionRows | Where-Object {
+        $_.C1 -eq $actionName
+    })
+    if ($delayedAction.Count -ne 1 -or
+            -not ([string] $delayedAction[0].C3).Contains(
+                "config $serviceScmName start= delayed-auto")) {
+        throw "Compiled MSI must explicitly enable delayed auto-start for $serviceScmName."
+    }
+}
+$executeSequenceRows = @(Invoke-MsiQuery -Sql (
+    "SELECT ``Action``,``Condition``,``Sequence`` FROM ``InstallExecuteSequence``"
+) -ColumnCount 3)
+$configureServices = @($executeSequenceRows | Where-Object {
+    $_.C1 -eq 'MsiConfigureServices'
+})
+$agentDelayedSequence = @($executeSequenceRows | Where-Object {
+    $_.C1 -eq 'CA_SetAgentDelayedAutoStart'
+})
+$watchdogDelayedSequence = @($executeSequenceRows | Where-Object {
+    $_.C1 -eq 'CA_SetWatchdogDelayedAutoStart'
+})
+$recoverySequence = @($executeSequenceRows | Where-Object {
+    $_.C1 -eq 'CA_SetAgentRecoveryActions'
+})
+$failureFlagSequence = @($executeSequenceRows | Where-Object {
+    $_.C1 -eq 'CA_SetAgentFailureFlag'
+})
+$startServices = @($executeSequenceRows | Where-Object {
+    $_.C1 -eq 'StartServices'
+})
+if ($configureServices.Count -ne 1 -or $agentDelayedSequence.Count -ne 1 -or
+        $watchdogDelayedSequence.Count -ne 1 -or $recoverySequence.Count -ne 1 -or
+        $failureFlagSequence.Count -ne 1 -or $startServices.Count -ne 1 -or
+        [int] $agentDelayedSequence[0].C3 -le [int] $configureServices[0].C3 -or
+        [int] $watchdogDelayedSequence[0].C3 -le [int] $agentDelayedSequence[0].C3 -or
+        [int] $recoverySequence[0].C3 -le [int] $watchdogDelayedSequence[0].C3 -or
+        [int] $failureFlagSequence[0].C3 -le [int] $recoverySequence[0].C3 -or
+        [int] $failureFlagSequence[0].C3 -ge [int] $startServices[0].C3) {
+    throw ('Delayed-auto-start and recovery policies must run after ' +
+        'MsiConfigureServices and before StartServices in dependency order.')
 }
 foreach ($service in @($agentService[0], $watchdogService[0])) {
     if ($service.C3 -ne "2") { throw "Service $($service.C1) is not automatic." }

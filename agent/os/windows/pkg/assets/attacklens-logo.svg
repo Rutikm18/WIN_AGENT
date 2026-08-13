@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="256" height="256">
+  <defs>
+    <linearGradient id="shieldGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#F2F0F5" />
+      <stop offset="100%" stop-color="#C5BBD6" />
+    </linearGradient>
+
+    <linearGradient id="purpleGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#9A55F5" />
+      <stop offset="100%" stop-color="#7326D3" />
+    </linearGradient>
+  </defs>
+
+  <path d="M16 2 L30 6 V16 C30 25 16 31 16 31 C16 31 2 25 2 16 V6 Z" fill="url(#shieldGrad)" stroke="#7326D3" stroke-width="1.5" stroke-linejoin="round"/>
+
+  <circle cx="16" cy="15" r="8" fill="none" stroke="url(#purpleGrad)" stroke-width="1.5" opacity="0.5"/>
+  <circle cx="16" cy="15" r="5" fill="none" stroke="url(#purpleGrad)" stroke-width="1.5" opacity="0.8"/>
+
+  <circle cx="16" cy="15" r="2" fill="url(#purpleGrad)" />
+
+  <line x1="16" y1="15" x2="25" y2="6" stroke="#9A55F5" stroke-width="2" stroke-linecap="round">
+    <animate attributeName="opacity" values="1;0.4;1" dur="2s" repeatCount="indefinite" />
+  </line>
+
+  <circle cx="16" cy="15" r="2" fill="none" stroke="#9A55F5" stroke-width="1.5">
+    <animate attributeName="r" values="2;10" dur="1.5s" repeatCount="indefinite" />
+    <animate attributeName="opacity" values="1;0" dur="1.5s" repeatCount="indefinite" />
+  </circle>
+</svg>

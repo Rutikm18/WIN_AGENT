@@ -37,6 +37,12 @@ def main() -> None:
     )
     parser.add_argument("--timeout", type=int, default=45)
     parser.add_argument(
+        "--records",
+        type=int,
+        default=1,
+        help="number of durable replay records to queue (1-10000)",
+    )
+    parser.add_argument(
         "--all-sections",
         action="store_true",
         help="collect and forward every enabled source section before the probe",
@@ -47,6 +53,9 @@ def main() -> None:
         help="run and forward one complete Windows security assessment",
     )
     args = parser.parse_args()
+
+    if not 1 <= args.records <= 10_000:
+        parser.error("--records must be between 1 and 10000")
 
     manager = args.manager.rstrip("/")
     agent_id = _safe_identity()
@@ -159,17 +168,41 @@ def main() -> None:
                         sca_collector.rollback()
                         raise
 
-                # Ten-minute-old collection proves replay-window-safe re-encryption.
-                message = agent._new_message(
-                    "agent_health",
-                    {
-                        "probe": "windows_reliable_delivery",
-                        "platform": "windows",
-                        "hostname": socket.gethostname(),
-                    },
-                    collected_at=int(time.time()) - 600,
+                # Ten-minute-old collections prove replay-window-safe
+                # re-encryption.  Batch enqueue also proves that a restart can
+                # never expose a partially committed test set.
+                messages = [
+                    agent._new_message(
+                        "agent_health",
+                        {
+                            "probe": "windows_reliable_delivery",
+                            "platform": "windows",
+                            "hostname": socket.gethostname(),
+                            "sequence": sequence,
+                            "record_count": args.records,
+                        },
+                        collected_at=int(time.time()) - 600,
+                    )
+                    for sequence in range(args.records)
+                ]
+                delivery_ids = agent._outbox.enqueue_many(messages)
+                if len(delivery_ids) != args.records or len(set(delivery_ids)) != args.records:
+                    raise RuntimeError("outbox did not create a unique durable delivery ID per record")
+                persisted_stats = agent._outbox.stats()
+                if persisted_stats["pending"] != args.records:
+                    raise RuntimeError("outbox did not durably persist every queued record")
+
+                # Simulate an offline service restart.  The second outbox
+                # instance must decrypt and replay records written by the first.
+                agent._outbox.close()
+                agent._outbox = ReliableOutbox(
+                    cfg["paths"]["spool_dir"],
+                    cfg["paths"]["security_dir"],
+                    agent_id,
                 )
-                agent._outbox.enqueue(message)
+                reopened_stats = agent._outbox.stats()
+                if reopened_stats["pending"] != args.records:
+                    raise RuntimeError("outbox records were lost across reopen")
                 sender = threading.Thread(
                     target=agent._reliable_sender_loop,
                     daemon=True,
@@ -198,6 +231,10 @@ def main() -> None:
             "acknowledged": agent._delivery_snapshot()["acknowledged"],
             "connection_state": agent._connection_state,
             "old_collection_age_sec": 600,
+            "requested_records": args.records,
+            "unique_delivery_ids": len(set(delivery_ids)),
+            "persisted_before_reopen": persisted_stats["pending"],
+            "recovered_after_reopen": reopened_stats["pending"],
             "forwarded_section_count": len(forwarded_sections),
             "forwarded_sections": sorted(forwarded_sections),
             "sca_summary": sca_summary,
@@ -206,7 +243,8 @@ def main() -> None:
         if (
             result["pending"] != 0
             or result["dead_letters"] != 0
-            or result["acknowledged"] < 1
+            or result["acknowledged"] != args.records
+            or result["unique_delivery_ids"] != args.records
         ):
             raise SystemExit(1)
 

@@ -1,6 +1,6 @@
 # AttackLens Agent — Windows Installation & Configuration Guide
 
-> For service startup diagnosis, safe repair, support bundles, and Docker scenarios, use [`advanced_support/`](advanced_support/README.md).
+> Superseding package and verification status: [CURRENT_IMPLEMENTATION.md](CURRENT_IMPLEMENTATION.md). Use 2.0.19 for new installs; older package references remain only for incident reconstruction. Support tooling is in [`advanced_support/`](advanced_support/README.md).
 
 ## Overview
 

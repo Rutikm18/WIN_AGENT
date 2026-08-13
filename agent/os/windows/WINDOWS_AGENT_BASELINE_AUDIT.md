@@ -1,5 +1,7 @@
 # Windows Agent Baseline Audit
 
+> This is the pre-implementation baseline. Compare it with the verified 2026-08-12 result in [CURRENT_IMPLEMENTATION.md](CURRENT_IMPLEMENTATION.md).
+
 > Startup failure findings and remediations from 2026-08-09 are recorded in [`advanced_support/ROOT_CAUSE.md`](advanced_support/ROOT_CAUSE.md).
 
 Date: 2026-07-19

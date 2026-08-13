@@ -78,6 +78,9 @@
   ('pyi_rth_cryptography_openssl',
    'C:\\Users\\WZ\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\rthooks\\pyi_rth_cryptography_openssl.py',
    'PYSOURCE'),
+  ('pyi_rth_pythoncom',
+   'C:\\Users\\WZ\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\rthooks\\pyi_rth_pythoncom.py',
+   'PYSOURCE'),
   ('watchdog_svc',
    'E:\\Project - '
    'AttacklensAgentwork\\PROJECT_CORE\\agent\\os\\windows\\watchdog_svc.py',
@@ -85,7 +88,7 @@
  [],
  False,
  False,
- 1786376998,
+ 1786617486,
  [('run.exe',
    'C:\\Users\\WZ\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\PyInstaller\\bootloader\\Windows-64bit-intel\\run.exe',
    'EXECUTABLE')],

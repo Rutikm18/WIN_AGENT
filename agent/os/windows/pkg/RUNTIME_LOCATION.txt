@@ -1,0 +1,29 @@
+AttackLens Agent runtime files
+================================
+
+Installed executables and operator tools:
+  C:\Program Files\AttackLens\
+
+Mutable runtime state (Windows common application data):
+  C:\ProgramData\AttackLens\
+    config\agent.toml           Protected configuration (Administrator/SYSTEM)
+    logs\agent.log              Protected rotating service log
+    logs\watchdog.log           Protected watchdog log
+    security\client.key         Protected manager credential
+    spool\outbox.sqlite3        Protected durable telemetry queue
+    data\agent.runtime.json     Protected detailed runtime state
+    status\agent-status.json    Sanitized read-only operator status
+    support\                    Administrator support bundles
+
+Status (does not require Administrator):
+  powershell -File "C:\Program Files\AttackLens\tools\attacklens-status.ps1"
+
+Change or repair the manager (run PowerShell as Administrator):
+  powershell -File "C:\Program Files\AttackLens\tools\configure-manager.ps1" -ManagerUrl "https://manager.example.com"
+
+Safely edit all configuration (Administrator; backup, validation and rollback):
+  powershell -File "C:\Program Files\AttackLens\tools\edit-agent-config.ps1"
+
+The protected files are intentionally not readable by a standard local user.
+Use the status command for routine health checks and an elevated terminal for
+diagnosis or configuration changes.

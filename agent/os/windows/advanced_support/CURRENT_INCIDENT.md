@@ -1,5 +1,7 @@
 # Installed but not communicating: 2026-08-09 diagnosis
 
+> Historical incident record. The corrected implementation and 2.0.19 verification evidence are in [../CURRENT_IMPLEMENTATION.md](../CURRENT_IMPLEMENTATION.md).
+
 ## Verified endpoint facts
 
 - `AttackLensAgent` and `AttackLensWatchdog` were installed, Automatic, running

@@ -151,6 +151,8 @@ class TestFileBackend:
 
     def test_refuses_world_readable_file(self, tmp_security_dir):
         """File with group/other bits should be refused."""
+        if os.name == "nt":
+            pytest.skip("POSIX mode bits are not enforceable on Windows")
         ks._file_store(AGENT_ID, SAMPLE_KEY, tmp_security_dir)
         path = ks._plain_path(AGENT_ID, tmp_security_dir)
         os.chmod(path, 0o644)   # make world-readable
@@ -158,6 +160,8 @@ class TestFileBackend:
         assert result is None   # security check refuses
 
     def test_key_file_mode_is_0600(self, tmp_security_dir):
+        if os.name == "nt":
+            pytest.skip("POSIX mode bits are not enforceable on Windows")
         ks._file_store(AGENT_ID, SAMPLE_KEY, tmp_security_dir)
         path = ks._plain_path(AGENT_ID, tmp_security_dir)
         mode = os.stat(path).st_mode & 0o777

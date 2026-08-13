@@ -52,3 +52,8 @@ agent/dist/
 # Windows artifacts
 agent/os/windows/pkg/*.msi
 agent/os/windows/pkg/*.wixobj
+agent/os/windows/run/
+agent/os/windows/installer/build/
+agent/os/windows/pkg/build/
+agent/os/windows/pkg/dist/
+agent/os/windows/pkg/qa-extract-*/

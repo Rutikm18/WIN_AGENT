@@ -1,6 +1,6 @@
 # AttackLens Windows Agent — Troubleshooting Guide
 
-> The current root-cause matrix and one-command diagnosis/repair workflow are in [`advanced_support/`](advanced_support/README.md) (2026-08-09).
+> Updated operating baseline: [CURRENT_IMPLEMENTATION.md](CURRENT_IMPLEMENTATION.md). The installed `status`, `diagnose`, `self-test`, and `repair` commands report manager contact, enrollment-file backend, outbox health, native capabilities, SCM policy, and self-defense evidence. One-command repair/Docker workflows remain in [`advanced_support/`](advanced_support/README.md).
 
 **Applies to:** AttackLens Windows Agent v2.0+  
 **Last updated:** 2026-07-23

@@ -1,5 +1,7 @@
 # AttackLens Windows Agent Architecture
 
+> Current implementation: [CURRENT_IMPLEMENTATION.md](CURRENT_IMPLEMENTATION.md). As of 2026-08-12 the runtime has 26 scheduled sections, native ETW process/DNS streams, push Event Log bookmarks, transactional persistence baselines, 46 CIS checks, and periodic self-defense auditing.
+
 > Startup recovery, root-cause evidence, failure cases, and one-command tooling are consolidated in [`advanced_support/`](advanced_support/README.md) (2026-08-09).
 
 Scope: `PROJECT_CORE/agent/os/windows/`
@@ -776,5 +778,6 @@ to the elevated Windows Installer server. The execute sequence copies that
 opaque Base64 JSON into deferred `CA_WriteConfig`; silent/basic-UI installs
 serialize directly in the execute session. Runtime `agent.toml` stays under
 ProgramData with SYSTEM full control and Administrators modify rights, while
-installed safe-edit tools provide validation, atomic replacement, backup,
-service coordination, and rollback.
+installed safe-edit tools provide staged/live validation, an exclusive durable
+write through the existing protected file object, backup, service coordination,
+and rollback without requesting a DACL rewrite.

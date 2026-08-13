@@ -114,7 +114,7 @@ class Sender:
         if _sys.platform == "darwin":
             _default_spool = "/Library/Jarvis/spool"
         elif _sys.platform == "win32":
-            _default_spool = r"C:\Program Files (x86)\Jarvis\spool"
+            _default_spool = r"C:\ProgramData\AttackLens\spool"
         else:
             _default_spool = "/var/lib/jarvis/spool"
         spool_dir = config.get("paths", {}).get("spool_dir", _default_spool)

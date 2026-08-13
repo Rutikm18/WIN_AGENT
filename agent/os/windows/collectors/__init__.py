@@ -24,6 +24,8 @@ from .inventory import (
 from .sca       import ScaCollector
 from .eventlog  import EventLogCollector
 from .security_audit import WindowsSecurityAuditCollector
+from .developer_security import WinDeveloperSecurityCollector
+from .persistence import PersistenceCollector
 
 _COLLECTOR_TYPES = [
         # volatile  (10 s)
@@ -42,8 +44,12 @@ _COLLECTOR_TYPES = [
         ScaCollector,
         # windows-only (5 min)
         EventLogCollector,
+        # Windows persistence inventory + baseline diff (30 min)
+        PersistenceCollector,
         # developer/AI security audit (6 hr)
         WindowsSecurityAuditCollector,
+        # DeepMesh developer/AI capability snapshot (1 hr)
+        WinDeveloperSecurityCollector,
 ]
 
 
@@ -89,4 +95,7 @@ class _LazyCollectorRegistry(Mapping[str, object]):
 
 COLLECTORS: Mapping[str, object] = _LazyCollectorRegistry(_COLLECTOR_TYPES)
 
-__all__ = ["COLLECTORS", "EventLogCollector", "WindowsSecurityAuditCollector"]
+__all__ = [
+    "COLLECTORS", "EventLogCollector", "PersistenceCollector",
+    "WindowsSecurityAuditCollector", "WinDeveloperSecurityCollector",
+]

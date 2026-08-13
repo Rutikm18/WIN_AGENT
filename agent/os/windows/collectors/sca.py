@@ -16,7 +16,10 @@ from __future__ import annotations
 import json
 import logging
 import os
+from pathlib import Path
+import re
 import subprocess
+import tempfile
 import threading
 import time
 import uuid
@@ -37,6 +40,149 @@ _CMD_NATIVE = (
     "net ", "cmd ", "cmd.exe", "where ", "ipconfig", "systeminfo", "bcdedit",
     "fsutil ", "nltest ", "dism ", "vssadmin ", "query ",
 )
+
+
+def _native_sca_probe(name: str) -> "tuple[int | None, str, str]":
+    """Run locale-independent Win32 posture probes used by bundled policy."""
+    try:
+        if name == "pending_reboot":
+            import winreg
+            keys = (
+                r"SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending",
+                r"SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired",
+                r"SYSTEM\CurrentControlSet\Control\Session Manager",
+            )
+            pending = False
+            for index, path in enumerate(keys):
+                try:
+                    with winreg.OpenKey(
+                        winreg.HKEY_LOCAL_MACHINE, path, 0,
+                        winreg.KEY_READ | winreg.KEY_WOW64_64KEY,
+                    ) as key:
+                        if index < 2:
+                            pending = True
+                        else:
+                            value, _kind = winreg.QueryValueEx(key, "PendingFileRenameOperations")
+                            pending = bool(value)
+                except FileNotFoundError:
+                    continue
+                if pending:
+                    break
+            return 0, "1" if pending else "0", ""
+
+        if name == "ntlm_session_security":
+            import winreg
+            path = r"SYSTEM\CurrentControlSet\Control\Lsa\MSV1_0"
+            with winreg.OpenKey(
+                winreg.HKEY_LOCAL_MACHINE, path, 0,
+                winreg.KEY_READ | winreg.KEY_WOW64_64KEY,
+            ) as key:
+                client = int(winreg.QueryValueEx(key, "NtlmMinClientSec")[0])
+                server = int(winreg.QueryValueEx(key, "NtlmMinServerSec")[0])
+            hardened = client >= 537395200 and server >= 537395200
+            return 0, "1" if hardened else "0", ""
+
+        if name == "password_complexity":
+            # Windows exposes no documented read API for this one local-policy
+            # bit. Export only SECURITYPOLICY to a private temporary directory;
+            # the invariant INF key is parsed and the directory is then removed.
+            system_root = os.environ.get("SystemRoot", r"C:\Windows")
+            executable = os.path.join(system_root, "System32", "secedit.exe")
+            with tempfile.TemporaryDirectory(prefix="attacklens-sca-") as directory:
+                output_path = os.path.join(directory, "policy.inf")
+                result = subprocess.run(
+                    [executable, "/export", "/cfg", output_path, "/areas", "SECURITYPOLICY"],
+                    capture_output=True, timeout=10.0,
+                    creationflags=CREATE_NO_WINDOW,
+                )
+                if result.returncode != 0 or not os.path.isfile(output_path):
+                    return 0, "Unknown:Unavailable", ""
+                raw = Path(output_path).read_bytes()
+                text = raw.decode("utf-16", errors="replace")
+                match = re.search(r"(?im)^\s*PasswordComplexity\s*=\s*(\d+)", text)
+                return 0, match.group(1) if match else "Unknown:Unavailable", ""
+
+        if name == "audit_coverage":
+            import ctypes
+            from ctypes import wintypes
+
+            # AuditQuerySystemPolicy requires SeSecurityPrivilege. LocalSystem
+            # owns it but Windows commonly leaves it disabled in the token.
+            try:
+                import win32api
+                import win32con
+                import win32security
+                token = win32security.OpenProcessToken(
+                    win32api.GetCurrentProcess(),
+                    win32con.TOKEN_ADJUST_PRIVILEGES | win32con.TOKEN_QUERY,
+                )
+                try:
+                    privilege = win32security.LookupPrivilegeValue(
+                        None, win32security.SE_SECURITY_NAME
+                    )
+                    win32security.AdjustTokenPrivileges(
+                        token, False,
+                        [(privilege, win32security.SE_PRIVILEGE_ENABLED)],
+                    )
+                finally:
+                    token.Close()
+            except Exception:
+                # The API call below provides the authoritative result. A
+                # restricted diagnostic token may not own this privilege.
+                pass
+
+            class GUID(ctypes.Structure):
+                _fields_ = [
+                    ("Data1", wintypes.DWORD), ("Data2", wintypes.WORD),
+                    ("Data3", wintypes.WORD), ("Data4", ctypes.c_ubyte * 8),
+                ]
+
+            class AUDIT_POLICY_INFORMATION(ctypes.Structure):
+                _fields_ = [
+                    ("AuditSubCategoryGuid", GUID),
+                    ("AuditingInformation", wintypes.ULONG),
+                    ("AuditCategoryGuid", GUID),
+                ]
+
+            def guid(value: str) -> GUID:
+                return GUID.from_buffer_copy(uuid.UUID(value).bytes_le)
+
+            # Logon: success+failure; Process Creation: success;
+            # User Account Management: success+failure.
+            requested = (GUID * 3)(
+                guid("0cce9215-69ae-11d9-bed3-505054503030"),
+                guid("0cce922b-69ae-11d9-bed3-505054503030"),
+                guid("0cce9235-69ae-11d9-bed3-505054503030"),
+            )
+            advapi = ctypes.WinDLL("advapi32", use_last_error=True)
+            query = advapi.AuditQuerySystemPolicy
+            query.argtypes = [
+                ctypes.POINTER(GUID), wintypes.ULONG,
+                ctypes.POINTER(ctypes.POINTER(AUDIT_POLICY_INFORMATION)),
+            ]
+            query.restype = wintypes.BOOLEAN
+            free = advapi.AuditFree
+            free.argtypes = [ctypes.c_void_p]
+            free.restype = None
+            result = ctypes.POINTER(AUDIT_POLICY_INFORMATION)()
+            if not query(requested, 3, ctypes.byref(result)):
+                error = ctypes.get_last_error()
+                if error in (5, 1314):
+                    return 0, "Unknown:AccessDenied", ""
+                return None, "", f"AuditQuerySystemPolicy failed: {error}"
+            try:
+                masks = [int(result[index].AuditingInformation) for index in range(3)]
+                covered = int((masks[0] & 3) == 3) + int((masks[1] & 1) == 1) + int((masks[2] & 3) == 3)
+                return 0, str(covered), ""
+            finally:
+                free(result)
+    except FileNotFoundError:
+        return 0, "Unknown:Unavailable", ""
+    except PermissionError:
+        return 0, "Unknown:AccessDenied", ""
+    except Exception as exc:
+        return None, "", f"{type(exc).__name__}: {exc}"
+    return None, "", f"unknown native probe: {name}"
 
 
 def _tokenize(cmd: str) -> "list[str]":
@@ -83,6 +229,8 @@ def _route_command(cmd: str, timeout: float) -> "tuple[int | None, str, str]":
     error rather than a failed check.
     """
     cmd = cmd.strip()
+    if cmd.lower().startswith("attacklens-native "):
+        return _native_sca_probe(cmd.split(None, 1)[1].strip().lower())
     low = cmd.lower()
     is_cmd_native = any(low.startswith(p) for p in _CMD_NATIVE)
     if is_cmd_native:

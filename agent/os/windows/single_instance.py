@@ -50,8 +50,14 @@ class SingleInstanceGuard:
         if self._kernel32 is None:
             create_mutex.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_wchar_p]
             create_mutex.restype = ctypes.c_void_p
+            # CreateMutexW reports object pre-existence through last-error even
+            # when it returns a valid handle. Clear any unrelated thread-local
+            # error immediately before the call so it cannot mimic a duplicate.
+            ctypes.set_last_error(0)
 
-        handle = create_mutex(None, False, self.name)
+        # Take initial ownership. release() then has a real mutex acquisition
+        # to release before closing the kernel handle.
+        handle = create_mutex(None, True, self.name)
         last_error = (
             int(self._get_last_error())
             if self._get_last_error is not None

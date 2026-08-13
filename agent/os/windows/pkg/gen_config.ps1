@@ -389,6 +389,7 @@ try {
         $toml += "spki_pin    = $(Quote-Toml $pin)${n}"
     }
     $toml += "timeout_sec = 30${n}"
+    $toml += "proxy_auto_detect = true${n}"
     $toml += "${n}"
     # enrollment.token is consumed on FIRST START only.
     # After enrollment the agent stores the api_key in DPAPI Credential Manager
@@ -406,6 +407,7 @@ try {
     $toml += "auto_reenroll = $autoReenrollToml${n}"
     $toml += "min_free_mb = 128${n}"
     $toml += "outbox_busy_timeout_ms = 5000${n}"
+    $toml += "delivery_stall_sec = 300${n}"
     $toml += "${n}"
     $toml += "[paths]${n}"
     $toml += "security_dir = `"C:/ProgramData/AttackLens/security`"${n}"
@@ -450,14 +452,18 @@ try {
         sca         = @{ enabled = 'true';  interval = 3600 }
         # Windows-only: Security + System event log (logon, process, service, task events)
         eventlog    = @{ enabled = 'true';  interval = 300   }
+        # Native persistence inventory; baseline changes are transactional.
+        persistence = @{ enabled = 'true';  interval = 1800  }
+        # DeepMesh privacy-safe developer/AI attack-surface snapshot.
+        developer_security = @{ enabled = 'true'; interval = 3600 }
         security_audit = @{ enabled = 'true'; interval = 21600 }
     }
 
     $enabledProfile = @{
-        baseline  = @('metrics','services','users','security','eventlog')
-        standard  = @('metrics','connections','processes','ports','network','arp','mounts','battery','openfiles','services','users','hardware','containers','storage','tasks','apps','packages','binaries','sbom','security','sysctl','configs','sca','eventlog','security_audit')
+        baseline  = @('metrics','services','users','security','eventlog','persistence')
+        standard  = @('metrics','connections','processes','ports','network','arp','mounts','battery','openfiles','services','users','hardware','containers','storage','tasks','apps','packages','binaries','sbom','security','sysctl','configs','sca','eventlog','persistence','developer_security','security_audit')
         intensive = @($sections.Keys)
-        incident  = @('metrics','connections','processes','network','services','users','security','eventlog','sca','security_audit')
+        incident  = @('metrics','connections','processes','network','services','users','security','eventlog','persistence','sca','developer_security','security_audit')
     }[$profile]
     foreach ($name in $sections.Keys) {
         $s     = $sections[$name]

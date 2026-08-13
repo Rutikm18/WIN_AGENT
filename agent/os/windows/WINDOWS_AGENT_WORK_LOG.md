@@ -1,6 +1,6 @@
 # AttackLens Windows Agent — Work Log
 
-> The 2026-08-09 startup incident analysis and implementation are consolidated in [`advanced_support/`](advanced_support/README.md).
+> Latest completed work and exact test/package evidence: [CURRENT_IMPLEMENTATION.md](CURRENT_IMPLEMENTATION.md). References below to 23 sections predate persistence, SCA, Event Log, and security-audit integration; the current scheduler has 26 sections. Incident automation remains in [`advanced_support/`](advanced_support/README.md).
 
 **Last updated:** 2026-05-16  
 **Working directory:** `PROJECT_CORE/agent/os/windows/`  
@@ -71,7 +71,7 @@ Windows SCM
  │    └── Monitors AttackLensAgent; restarts on failure (max 5 in 5 min)
  └── AttackLensAgent (service.py → win_agent.py)
       ├── _enroll_if_needed()  → POST /api/v1/enroll (once per machine)
-      ├── collector threads × 23 sections → circuit-breaker guarded
+      ├── collector threads × 26 sections → circuit-breaker guarded
       ├── sender thread         → POST /api/v1/ingest with AES-256-GCM envelope
       └── heartbeat thread      → agent_health every 60s
 ```

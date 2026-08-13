@@ -38,6 +38,8 @@ class TestFileBackend:
         assert loaded == key
 
     def test_file_permissions_are_exactly_0600(self, tmp_path):
+        if os.name == "nt":
+            pytest.skip("POSIX mode bits are not enforceable on Windows")
         store_key("agent-001", secrets.token_hex(32), backend="file",
                   security_dir=str(tmp_path))
         path = _key_file_path(str(tmp_path), "agent-001")
@@ -49,6 +51,8 @@ class TestFileBackend:
 
     def test_load_refuses_world_readable_file(self, tmp_path):
         """A key file readable by others is treated as compromised."""
+        if os.name == "nt":
+            pytest.skip("POSIX mode bits are not enforceable on Windows")
         key = secrets.token_hex(32)
         path = tmp_path / "agent-002.key"
         path.write_text(key)
@@ -57,6 +61,8 @@ class TestFileBackend:
         assert result is None, "Should refuse to load world-readable key"
 
     def test_load_refuses_group_readable_file(self, tmp_path):
+        if os.name == "nt":
+            pytest.skip("POSIX mode bits are not enforceable on Windows")
         path = tmp_path / "agent-003.key"
         path.write_text(secrets.token_hex(32))
         path.chmod(0o640)   # group readable

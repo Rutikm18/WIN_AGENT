@@ -1435,10 +1435,20 @@ class WindowsSecurityAuditCollector(WinBaseCollector):
         docker = self._trusted_docker()
         result: dict[str, Any] = {
             "available": bool(docker), "client": str(docker) if docker else None,
+            "daemon_reachable": False,
             "containers": [], "images": [], "volumes": [], "networks": [],
             "user_resolved_cli_executed": False,
         }
         if not docker:
+            return result
+        version_output = self._run([
+            str(docker), "version", "--format", "{{json .Server.Version}}",
+        ])
+        try:
+            result["daemon_reachable"] = bool(json.loads(version_output.strip()))
+        except (ValueError, json.JSONDecodeError, TypeError):
+            result["daemon_reachable"] = False
+        if not result["daemon_reachable"]:
             return result
         ps_output = self._run([str(docker), "ps", "--all", "--no-trunc", "--format", "{{json .}}"])
         summaries = []

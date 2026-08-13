@@ -66,6 +66,7 @@ def _connections(raw: list) -> list:
             "service":     _s_opt(c.get("service")),
             "pid":         _i_opt(c.get("pid")),
             "process":     _s_opt(c.get("process")),
+            "_win":        c.get("_win") if isinstance(c.get("_win"), dict) else None,
         }
         for c in raw if isinstance(c, dict)
     ]
@@ -87,6 +88,7 @@ def _processes(raw: list) -> list:
             "started_at": _i_opt(p.get("started_at")),
             "cmdline":    _s_opt(p.get("cmdline")),
             "signed":     _s_opt(p.get("signed")),
+            "_win":       p.get("_win") if isinstance(p.get("_win"), dict) else None,
         }
         for p in raw if isinstance(p, dict)
     ]
@@ -538,6 +540,38 @@ def _security_audit(raw: Any) -> dict:
     }
 
 
+def _developer_security(raw: Any) -> dict:
+    """Keep the versioned DeepMesh snapshot intact across the wire."""
+    if isinstance(raw, dict):
+        return raw
+    return {
+        "schema_version": 1,
+        "platform": "windows",
+        "scope": {"users": [], "system_context": False},
+        "privacy": {
+            "secret_contents_collected": False,
+            "credential_values_collected": False,
+            "sensitive_values_redacted": True,
+            "collection_scope": "metadata_and_paths_only",
+        },
+        "capabilities": {},
+        "collection": {
+            "partial": True,
+            "errors": [{"capability": "collector", "error": "InvalidRoot"}],
+            "issues": [],
+            "duration_ms": 0,
+            "payload_truncated": False,
+        },
+    }
+
+
+def _persistence(raw: Any) -> list[dict]:
+    """Preserve typed native persistence records and discard invalid roots."""
+    if not isinstance(raw, list):
+        return []
+    return [record for record in raw if isinstance(record, dict)]
+
+
 _NORMALIZERS: dict[str, Any] = {
     "metrics":     _metrics,     "connections": _connections,
     "processes":   _processes,   "ports":       _ports,
@@ -552,6 +586,8 @@ _NORMALIZERS: dict[str, Any] = {
     "binaries":    _binaries,    "sbom":        _sbom,
     "sca":         _sca,         "eventlog":    _eventlog,
     "security_audit": _security_audit,
+    "developer_security": _developer_security,
+    "persistence": _persistence,
 }
 
 

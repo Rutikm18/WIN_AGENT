@@ -1,5 +1,7 @@
 # Windows Agent Resilience Design
 
+> Implementation verification (2026-08-12): [CURRENT_IMPLEMENTATION.md](CURRENT_IMPLEMENTATION.md). SCM/ACL self-repair runs every five minutes; package hashes are rechecked every 30 minutes; config/binary/Defender-exclusion drift is surfaced without unsafe automatic replacement.
+
 > The implemented startup recovery state machine and safety boundaries are documented in [`advanced_support/`](advanced_support/README.md).
 
 Updated: 2026-07-27

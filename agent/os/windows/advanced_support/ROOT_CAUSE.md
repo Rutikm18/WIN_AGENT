@@ -1,5 +1,7 @@
 # Service Startup Root-Cause Analysis
 
+> Historical root-cause record. The fixes are included in the verified 2.0.19 implementation summarized in [../CURRENT_IMPLEMENTATION.md](../CURRENT_IMPLEMENTATION.md).
+
 ## Conclusion
 
 The source and installer history contained multiple independent ways for both services to fail. Two are high-confidence causes of the observed immediate-start failures; the others explain intermittent, machine-specific, and restart-loop cases. A machine support bundle is still the final authority for identifying which combination occurred on a particular endpoint.

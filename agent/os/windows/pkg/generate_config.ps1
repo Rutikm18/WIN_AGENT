@@ -291,6 +291,10 @@ $sections = [ordered]@{
     # Windows-only section - reads Security + System Event Log channels
     # Covers: logon events, process creation, service install, task manipulation
     eventlog    = @{ e=$true;  i=300  }
+    # Native persistence inventory and first-seen baseline change detection
+    persistence = @{ e=$true; i=1800 }
+    # DeepMesh privacy-safe developer/AI attack-surface snapshot
+    developer_security = @{ e=$true; i=3600 }
     # Read-only developer, AI/MCP, persistence and credential-surface audit
     security_audit = @{ e=$true; i=21600 }
 }

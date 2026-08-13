@@ -1382,16 +1382,41 @@ async function loadTimeline() {
 }
 
 // ── Raw Telemetry ─────────────────────────────────────────────────────────
-const SECTIONS = ['metrics','connections','processes','ports','network','battery','openfiles','services','users','hardware','containers','arp','mounts','storage','tasks','security','sysctl','configs','apps','packages','binaries','sbom','agent_health'];
+const DEFAULT_SECTIONS = ['metrics','connections','processes','ports','network','arp','mounts','battery','openfiles','services','users','hardware','containers','storage','tasks','security','sysctl','configs','sca','eventlog','persistence','developer_security','security_audit','apps','packages','binaries','sbom','agent_health','agent_lifecycle'];
 let currentSection = 'metrics';
 
-function loadSections() {
+async function loadSections() {
   const aid = S.selectedAgent;
   const picker = document.getElementById('section-picker');
-  picker.innerHTML = SECTIONS.map(s =>
-    `<button class="section-pill ${s===currentSection?'active':''}" onclick="loadSection('${s}',this)">${s}</button>`
-  ).join('');
-  if (aid) loadSection(currentSection);
+  let sections = [...DEFAULT_SECTIONS];
+  if (aid) {
+    try {
+      const summary = await GET(`/agents/${encodeURIComponent(aid)}/sections`);
+      const reported = Object.keys(summary || {})
+        .filter(s => /^[A-Za-z0-9_.:-]{1,128}$/.test(s));
+      if (reported.length) {
+        sections = [
+          ...DEFAULT_SECTIONS.filter(s => reported.includes(s)),
+          ...reported.filter(s => !DEFAULT_SECTIONS.includes(s)).sort(),
+        ];
+      }
+    } catch (e) {
+      console.warn('loadSections summary:', e);
+    }
+  }
+
+  if (!sections.includes(currentSection)) {
+    currentSection = sections.includes('metrics') ? 'metrics' : sections[0];
+  }
+  picker.replaceChildren();
+  for (const section of sections) {
+    const button = document.createElement('button');
+    button.className = `section-pill ${section === currentSection ? 'active' : ''}`;
+    button.textContent = section;
+    button.addEventListener('click', () => loadSection(section, button));
+    picker.appendChild(button);
+  }
+  if (aid && currentSection) loadSection(currentSection);
 }
 
 async function loadSection(sec, btn) {

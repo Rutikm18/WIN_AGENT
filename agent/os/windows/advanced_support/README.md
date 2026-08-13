@@ -1,10 +1,12 @@
 # AttackLens Windows Advanced Support
 
+> Current verified runtime/package status: [../CURRENT_IMPLEMENTATION.md](../CURRENT_IMPLEMENTATION.md). Build 2.0.19 supersedes the older incident artifacts documented below.
+
 This folder is the single entry point for startup diagnosis, conservative repair, support-bundle collection, Docker scenario validation, root-cause evidence, and the failure matrix for `AttackLensAgent` and `AttackLensWatchdog`.
 
 ## Fastest commands
 
-Repair a rolled-back 2.0.6 installation, install 2.0.10 with verbose logging,
+Repair a rolled-back installation, install 2.0.19 with verbose logging,
 and verify both services from an Administrator PowerShell window:
 
 ```powershell
@@ -34,7 +36,7 @@ missing, run `-Mode Repair` first. It repairs the preserved ProgramData ACLs
 without deleting configuration, identity, credentials, or the outbox; it then
 returns so the corrected MSI can restore the missing binaries and services.
 
-Run every portable failure scenario in an isolated, network-disabled container:
+Run all nine portable failure scenarios in an isolated, network-disabled container:
 
 ```powershell
 docker compose run --rm --build diagnostics

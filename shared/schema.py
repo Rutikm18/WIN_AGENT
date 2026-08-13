@@ -73,6 +73,7 @@ CONNECTIONS_RECORD = {
     "state":        (str, None),    # "ESTABLISHED" | "LISTEN" | "TIME_WAIT" etc.
     "pid":          (int, None),
     "process":      (str, None),    # process name
+    "_win":         (dict, None),   # Windows-native DNS/ETW enrichment
 }
 
 # ── processes ─────────────────────────────────────────────────────────────────
@@ -87,6 +88,7 @@ PROCESSES_RECORD = {
     "status":       (str,  None),   # "running" | "sleeping" | "zombie"
     "cmdline":      (str,  None),   # full command line (may be truncated)
     "started_at":   (int,  None),   # Unix epoch
+    "_win":         (dict, None),   # Windows-native ETW/security enrichment
 }
 
 # ── ports ─────────────────────────────────────────────────────────────────────
@@ -315,6 +317,67 @@ SBOM_COMPONENT_RECORD = {
     "cpe":          (str,  None),   # Common Platform Enumeration
 }
 
+# ── Windows event and agent control-plane telemetry ─────────────────────────
+EVENTLOG_RECORD = {
+    "event_id": int,
+    "timestamp": (int, None),
+    "computer": (str, None),
+    "channel": str,
+    "category": str,
+    "subject": (str, None),
+    "detail": dict,
+}
+
+SCA = {
+    "schema_version": int,
+    "scan_id": str,
+    "generated_at": int,
+    "started_at": int,
+    "completed_at": int,
+    "duration_ms": int,
+    "policies": list,
+    "summary": dict,
+    "changes": dict,
+    "collector_error": (dict, None),
+}
+
+SECURITY_AUDIT = {
+    "schema_version": int,
+    "partial": bool,
+    "coverage": dict,
+    "findings": list,
+}
+
+DEVELOPER_SECURITY = {
+    "schema_version": int,
+    "platform": str,
+    "scope": dict,
+    "privacy": dict,
+    "capabilities": dict,
+    "collection": dict,
+}
+
+PERSISTENCE_RECORD = {
+    "entry_id": str,
+    "surface": str,
+    "location": str,
+    "name": str,
+    "command": (str, None),
+    "user": (str, None),
+    "enabled": (bool, None),
+    "privileged": (bool, None),
+    "status": str,
+    "change": str,
+    "first_seen": (int, None),
+    "last_seen": (int, None),
+    "metadata": dict,
+}
+
+# Health and lifecycle records are versioned internally and intentionally
+# extensible. The section-level contract is a dictionary; consumers validate
+# event-specific fields after dispatch.
+AGENT_EVENT: dict[str, type] = {}
+
 
 # ── Schema registry ───────────────────────────────────────────────────────────
 
@@ -341,6 +404,13 @@ SCHEMAS: dict[str, dict] = {
     "packages":    PACKAGES_RECORD,
     "binaries":    BINARIES_RECORD,
     "sbom":        SBOM_COMPONENT_RECORD,
+    "eventlog":    EVENTLOG_RECORD,
+    "sca":         SCA,
+    "security_audit": SECURITY_AUDIT,
+    "developer_security": DEVELOPER_SECURITY,
+    "persistence": PERSISTENCE_RECORD,
+    "agent_health": AGENT_EVENT,
+    "agent_lifecycle": AGENT_EVENT,
 }
 
 # Sections where `data` is a list of records (vs a single dict)
@@ -348,11 +418,12 @@ LIST_SECTIONS: frozenset[str] = frozenset({
     "connections", "processes", "ports", "arp", "mounts",
     "openfiles", "services", "users", "hardware", "containers",
     "storage", "tasks", "sysctl", "configs", "apps", "packages",
-    "binaries", "sbom",
+    "binaries", "sbom", "eventlog", "persistence",
 })
 # Sections where `data` is a single dict (not a list)
 DICT_SECTIONS: frozenset[str] = frozenset({
-    "metrics", "network", "battery", "security",
+    "metrics", "network", "battery", "security", "sca",
+    "security_audit", "developer_security", "agent_health", "agent_lifecycle",
 })
 
 

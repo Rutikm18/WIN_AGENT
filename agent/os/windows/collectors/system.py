@@ -21,6 +21,18 @@ import time
 
 import psutil
 
+try:  # Optional on non-Windows unit-test hosts.
+    import win32service
+except ImportError:  # pragma: no cover - feature-detected at runtime
+    win32service = None
+
+try:
+    import win32net
+    import win32netcon
+    import win32security
+except ImportError:  # pragma: no cover - feature-detected at runtime
+    win32net = win32netcon = win32security = None
+
 from .base import WinBaseCollector
 
 log = logging.getLogger("agent.windows.collectors.system")
@@ -117,144 +129,184 @@ class OpenFilesCollector(WinBaseCollector):
 
 # ── services ──────────────────────────────────────────────────────────────────
 
+_SERVICE_STATE_NAMES = {
+    1: "stopped",
+    2: "start_pending",
+    3: "stop_pending",
+    4: "running",
+    5: "continue_pending",
+    6: "pause_pending",
+    7: "paused",
+}
+
+
+def _native_services(api=None) -> list[dict]:
+    """Enumerate SCM records without localized output or subprocesses."""
+    api = api or win32service
+    if api is None:
+        raise RuntimeError("pywin32 win32service is unavailable")
+
+    scm = api.OpenSCManager(None, None, api.SC_MANAGER_ENUMERATE_SERVICE)
+    records: list[dict] = []
+    try:
+        entries = api.EnumServicesStatusEx(
+            scm,
+            api.SERVICE_WIN32 | api.SERVICE_DRIVER,
+            api.SERVICE_STATE_ALL,
+        )
+        for entry in entries:
+            # Current pywin32 returns a dict; older releases returned
+            # (service_name, display_name, status_dict). Support both shapes.
+            if isinstance(entry, dict):
+                status = entry
+                service_name = status.get("ServiceName", "")
+                display_name = status.get("DisplayName", service_name)
+            else:
+                service_name, display_name, status = entry
+            current_state = int(status.get("CurrentState", 0))
+            service_type = int(status.get("ServiceType", 0))
+            pid = int(status.get("ProcessId", 0)) or None
+            start_type = None
+            service_handle = None
+            try:
+                service_handle = api.OpenService(
+                    scm,
+                    service_name,
+                    api.SERVICE_QUERY_CONFIG,
+                )
+                start_type = int(api.QueryServiceConfig(service_handle)[1])
+            except Exception as exc:
+                log.debug("service config unavailable name=%s error=%s", service_name, exc)
+            finally:
+                if service_handle is not None:
+                    try:
+                        api.CloseServiceHandle(service_handle)
+                    except Exception:
+                        pass
+
+            disabled = start_type == getattr(api, "SERVICE_DISABLED", 4)
+            manual = start_type == getattr(api, "SERVICE_DEMAND_START", 3)
+            is_driver = bool(service_type & getattr(api, "SERVICE_DRIVER", 0x0B))
+            records.append({
+                "name": str(service_name),
+                "status": "disabled" if disabled else _SERVICE_STATE_NAMES.get(
+                    current_state, "unknown"
+                ),
+                "enabled": None if start_type is None else not (disabled or manual),
+                "pid": pid,
+                "type": "windriver" if is_driver else "winsvc",
+                "description": str(display_name or service_name),
+            })
+        return records
+    finally:
+        api.CloseServiceHandle(scm)
+
+
 class ServicesCollector(WinBaseCollector):
     name    = "services"
     timeout = 20
 
     def collect(self) -> list:
-        services: list[dict] = []
-
         try:
-            for svc in psutil.win_service_iter():
-                try:
-                    si = svc.as_dict()
-                    raw_status = (si.get("status") or "unknown").lower()
-                    start_type = (si.get("start_type") or "").lower()
-                    # Map psutil start_type → enabled bool
-                    enabled = start_type not in ("disabled", "manual")
-                    services.append({
-                        "name":        si.get("name", ""),
-                        "status":      raw_status,
-                        "enabled":     enabled,
-                        "pid":         si.get("pid"),
-                        "type":        "winsvc",
-                        "description": si.get("display_name") or si.get("name"),
-                    })
-                except (psutil.NoSuchProcess, psutil.AccessDenied):
-                    continue
-        except Exception:
-            # Fallback: parse sc query output
-            out = self._run(["sc", "query", "type=", "all", "state=", "all"])
-            curr: dict = {}
-            for line in out.splitlines():
-                line = line.strip()
-                if line.startswith("SERVICE_NAME:"):
-                    if curr.get("name"):
-                        services.append(curr)
-                    curr = {
-                        "name": line.split(":", 1)[-1].strip(),
-                        "status": "unknown", "enabled": None,
-                        "pid": None, "type": "winsvc", "description": None,
-                    }
-                elif "STATE" in line and curr:
-                    if "RUNNING" in line:
-                        curr["status"] = "running"
-                    elif "STOPPED" in line:
-                        curr["status"] = "stopped"
-                    elif "PAUSED" in line:
-                        curr["status"] = "paused"
-                elif line.startswith("DISPLAY_NAME:") and curr:
-                    curr["description"] = line.split(":", 1)[-1].strip()
-            if curr.get("name"):
-                services.append(curr)
-
-        return services
+            return _native_services()
+        except Exception as exc:
+            log.debug("native SCM service enumeration failed: %s", exc)
+            return []
 
 
 # ── users ─────────────────────────────────────────────────────────────────────
+
+def _paged_net_call(call, *args) -> list[dict]:
+    """Drain a pywin32 Net* pagination API while guarding bad resume tokens."""
+    rows: list[dict] = []
+    resume = 0
+    seen: set[int] = set()
+    while True:
+        batch, _total, next_resume = call(*args, resume)
+        rows.extend(batch or [])
+        next_resume = int(next_resume or 0)
+        if not next_resume or next_resume in seen:
+            return rows
+        seen.add(next_resume)
+        resume = next_resume
+
+
+def _native_local_users(net=None, constants=None, security=None) -> list[dict]:
+    """Return local user accounts through NetAPI32-backed pywin32 calls."""
+    net = net or win32net
+    constants = constants or win32netcon
+    security = security or win32security
+    if net is None or constants is None or security is None:
+        raise RuntimeError("pywin32 account APIs are unavailable")
+
+    admin_names: set[str] = set()
+    try:
+        admin_sid = security.ConvertStringSidToSid("S-1-5-32-544")
+        admin_group, _domain, _use = security.LookupAccountSid(None, admin_sid)
+        members = _paged_net_call(
+            net.NetLocalGroupGetMembers,
+            None,
+            admin_group,
+            2,
+        )
+        for member in members:
+            account = str(member.get("domainandname") or member.get("name") or "")
+            if account:
+                admin_names.add(account.rsplit("\\", 1)[-1].casefold())
+    except Exception as exc:
+        log.debug("local Administrators membership unavailable: %s", exc)
+
+    accounts = _paged_net_call(
+        net.NetUserEnum,
+        None,
+        3,
+        constants.FILTER_NORMAL_ACCOUNT,
+    )
+    disabled_flag = int(getattr(constants, "UF_ACCOUNTDISABLE", 0x0002))
+    lockout_flag = int(getattr(constants, "UF_LOCKOUT", 0x0010))
+    rows: list[dict] = []
+    for account in accounts:
+        name = str(account.get("name") or "")
+        if not name:
+            continue
+        flags = int(account.get("flags") or 0)
+        last_logon = int(account.get("last_logon") or 0) or None
+        home = str(account.get("home_dir") or "").strip() or f"C:\\Users\\{name}"
+        rows.append({
+            "name": name,
+            "uid": None,
+            "gid": None,
+            "shell": None,
+            "home": home,
+            "last_login": last_logon,
+            "admin": name.casefold() in admin_names,
+            "locked": bool(flags & (disabled_flag | lockout_flag)),
+        })
+    return rows
+
 
 class UsersCollector(WinBaseCollector):
     name    = "users"
     timeout = 20
 
     def collect(self) -> list:
-        # Currently logged-in sessions (for last_login fallback)
-        sessions: dict[str, psutil._common.suser] = {}
         try:
-            for u in psutil.users():
-                sessions[u.name.split("\\")[-1].lower()] = u
-        except Exception:
-            pass
-
-        # Admin group members
-        admin_names: set[str] = set()
-        adm_out = self._run_ps(
-            "try { Get-LocalGroupMember -Group 'Administrators' | "
-            "Select-Object -ExpandProperty Name | ConvertTo-Json } catch { '[]' }"
-        )
-        try:
-            raw = json.loads(adm_out.strip() or "[]")
-            if isinstance(raw, str):
-                raw = [raw]
-            for entry in raw or []:
-                admin_names.add(str(entry).split("\\")[-1].lower())
-        except Exception:
-            pass
-
-        # All local accounts
-        users: list[dict] = []
-        ps_out = self._run_ps(
-            "Get-LocalUser | Select-Object Name,Enabled,LastLogon,"
-            "PasswordLastSet,Description | ConvertTo-Json"
-        )
-        try:
-            accts = json.loads(ps_out.strip() or "[]")
-            if isinstance(accts, dict):
-                accts = [accts]
-            for a in accts or []:
-                name      = a.get("Name", "")
-                name_low  = name.lower()
-                last_login = None
-                try:
-                    # PowerShell serialises DateTime as "/Date(ms)/"
-                    ll = str(a.get("LastLogon") or "")
-                    m  = re.search(r"/Date\((-?\d+)\)", ll)
-                    if m:
-                        last_login = int(m.group(1)) // 1000
-                except Exception:
-                    pass
-                sess = sessions.get(name_low)
-                users.append({
-                    "name":       name,
-                    "uid":        None,   # no UID concept on Windows
-                    "gid":        None,
-                    "shell":      None,
-                    "home":       f"C:\\Users\\{name}",
-                    "last_login": last_login or (int(sess.started) if sess else None),
-                    "admin":      name_low in admin_names,
-                    "locked":     not bool(a.get("Enabled", True)),
-                })
+            rows = _native_local_users()
         except Exception as exc:
-            log.debug("users PS parse: %s", exc)
-            # Fallback: net user
-            out = self._run(["net", "user"])
-            for line in out.splitlines():
-                line = line.strip()
-                if (not line or line.startswith("-") or
-                        "User accounts" in line or
-                        "command completed" in line.lower()):
-                    continue
-                for token in line.split():
-                    name_low = token.lower()
-                    users.append({
-                        "name": token, "uid": None, "gid": None,
-                        "shell": None, "home": f"C:\\Users\\{token}",
-                        "last_login": None,
-                        "admin": name_low in admin_names,
-                        "locked": None,
-                    })
+            log.debug("native local-account enumeration failed: %s", exc)
+            return []
 
-        return users
+        # NetUserEnum last_logon can lag behind an active interactive session.
+        sessions: dict[str, int] = {}
+        try:
+            for session in psutil.users():
+                sessions[session.name.rsplit("\\", 1)[-1].casefold()] = int(session.started)
+        except Exception:
+            pass
+        for row in rows:
+            if row["last_login"] is None:
+                row["last_login"] = sessions.get(row["name"].casefold())
+        return rows
 
 
 # ── hardware ──────────────────────────────────────────────────────────────────

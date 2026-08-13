@@ -13,6 +13,8 @@ Strategy
 from __future__ import annotations
 
 import logging
+import ctypes
+import ipaddress
 import re
 import socket
 
@@ -168,44 +170,149 @@ class NetworkCollector(WinBaseCollector):
 
 # ── arp ───────────────────────────────────────────────────────────────────────
 
+_IF_MAX_PHYS_ADDRESS_LENGTH = 32
+_NEIGHBOR_STATES = {
+    0: "unreachable",
+    1: "incomplete",
+    2: "probe",
+    3: "delay",
+    4: "stale",
+    5: "reachable",
+    6: "permanent",
+}
+
+
+class _SockaddrInet(ctypes.Union):
+    _fields_ = [("raw", ctypes.c_ubyte * 28), ("family", ctypes.c_ushort)]
+
+
+class _ReachabilityTime(ctypes.Union):
+    _fields_ = [
+        ("last_reachable", ctypes.c_ulong),
+        ("last_unreachable", ctypes.c_ulong),
+    ]
+
+
+class _MibIpNetRow2(ctypes.Structure):
+    _fields_ = [
+        ("address", _SockaddrInet),
+        ("interface_index", ctypes.c_ulong),
+        ("interface_luid", ctypes.c_ulonglong),
+        ("physical_address", ctypes.c_ubyte * _IF_MAX_PHYS_ADDRESS_LENGTH),
+        ("physical_address_length", ctypes.c_ulong),
+        ("state", ctypes.c_int),
+        ("flags", ctypes.c_ubyte),
+        ("_padding", ctypes.c_ubyte * 3),
+        ("reachability_time", _ReachabilityTime),
+    ]
+
+
+class _MibIpNetTable2(ctypes.Structure):
+    _fields_ = [
+        ("num_entries", ctypes.c_ulong),
+        ("table", _MibIpNetRow2 * 1),
+    ]
+
+
+def _neighbor_address(row: _MibIpNetRow2) -> str | None:
+    family = int(row.address.family)
+    raw = bytes(row.address.raw)
+    try:
+        if family == socket.AF_INET:
+            return socket.inet_ntop(socket.AF_INET, raw[4:8])
+        if family == socket.AF_INET6:
+            return socket.inet_ntop(socket.AF_INET6, raw[8:24])
+    except OSError:
+        return None
+    return None
+
+
+def _row_to_neighbor(row: _MibIpNetRow2) -> dict | None:
+    address = _neighbor_address(row)
+    if not address:
+        return None
+    try:
+        ip = ipaddress.ip_address(address)
+    except ValueError:
+        return None
+    # GetIpNetTable2 also exposes protocol-created multicast, broadcast and
+    # loopback rows.  They are not learned L2 neighbours and otherwise flood
+    # ARP telemetry with entries such as 224.0.0.251 and ff02::fb.
+    if ip.is_multicast or ip.is_unspecified or ip.is_loopback:
+        return None
+    physical_length = min(
+        int(row.physical_address_length),
+        _IF_MAX_PHYS_ADDRESS_LENGTH,
+    )
+    physical = bytes(row.physical_address[:physical_length])
+    if not physical or physical == b"\x00" * physical_length:
+        return None
+    # Reject group/broadcast hardware addresses: only unicast neighbours are
+    # useful to the ARP-inventory and spoofing rules.
+    if physical[0] & 1:
+        return None
+    mac = ":".join(f"{byte:02x}" for byte in physical)
+    interface_index = int(row.interface_index)
+    try:
+        interface = socket.if_indextoname(interface_index)
+    except (AttributeError, OSError):
+        interface = str(interface_index)
+    return {
+        "ip": address,
+        "mac": mac,
+        "interface": interface,
+        "state": _NEIGHBOR_STATES.get(int(row.state), "unknown"),
+    }
+
+
+def _native_neighbors(iphlpapi: object | None = None) -> list[dict]:
+    if iphlpapi is None:
+        if not hasattr(ctypes, "WinDLL"):
+            return []
+        iphlpapi = ctypes.WinDLL("iphlpapi", use_last_error=True)
+    get_table = getattr(iphlpapi, "GetIpNetTable2")
+    free_table = getattr(iphlpapi, "FreeMibTable")
+    try:
+        get_table.argtypes = [ctypes.c_ushort, ctypes.POINTER(ctypes.c_void_p)]
+        get_table.restype = ctypes.c_ulong
+        free_table.argtypes = [ctypes.c_void_p]
+        free_table.restype = None
+    except (AttributeError, TypeError):
+        pass
+
+    table_pointer = ctypes.c_void_p()
+    status = int(get_table(socket.AF_UNSPEC, ctypes.byref(table_pointer)))
+    if status != 0 or not table_pointer.value:
+        log.debug("GetIpNetTable2 failed status=%d", status)
+        return []
+    try:
+        header = ctypes.cast(
+            table_pointer,
+            ctypes.POINTER(_MibIpNetTable2),
+        ).contents
+        first_row = int(table_pointer.value) + _MibIpNetTable2.table.offset
+        rows = ctypes.cast(first_row, ctypes.POINTER(_MibIpNetRow2))
+        result: list[dict] = []
+        for index in range(int(header.num_entries)):
+            row = rows[index]
+            parsed = _row_to_neighbor(row)
+            if parsed is not None:
+                result.append(parsed)
+        return result
+    finally:
+        free_table(table_pointer)
+
+
 class ArpCollector(WinBaseCollector):
     name    = "arp"
     timeout = 10
 
     def collect(self) -> list:
-        entries: list[dict] = []
-        out   = self._run(["arp", "-a"])
-        iface = None
-
-        for line in out.splitlines():
-            line = line.strip()
-            # "Interface: 192.168.1.5 --- 0xb"
-            if line.lower().startswith("interface:"):
-                iface = line.split(":")[1].split("---")[0].strip()
-                continue
-            parts = line.split()
-            if len(parts) < 2:
-                continue
-            ip  = parts[0]
-            mac = parts[1]
-            # Validate IP pattern
-            if not re.match(r"^\d{1,3}(\.\d{1,3}){3}$", ip):
-                continue
-            # Normalize MAC (Windows uses dashes)
-            mac_norm = mac.replace("-", ":").lower()
-            # Broadcast / multicast MACs carry no useful identity. Keep the row —
-            # it still records a live IP on the segment — but null the MAC, matching
-            # the macOS arp collector's handling of incomplete/broadcast entries.
-            if mac_norm == "ff:ff:ff:ff:ff:ff" or mac_norm.startswith("01:"):
-                mac_norm = None
-            state = parts[2] if len(parts) > 2 else None
-            entries.append({
-                "ip":        ip,
-                "mac":       mac_norm,
-                "interface": iface,
-                "state":     state,
-            })
-        return entries
+        try:
+            return _native_neighbors()
+        except Exception as exc:
+            log.debug("GetIpNetTable2 neighbor collection failed: %s", exc)
+            return []
 
 
 # ── mounts ────────────────────────────────────────────────────────────────────

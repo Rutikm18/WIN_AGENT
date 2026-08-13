@@ -52,6 +52,44 @@ def _outbox_status(spool_dir: str) -> dict[str, Any]:
                     "SELECT state, COUNT(*) FROM outbox GROUP BY state"
                 ).fetchall()
             }
+            if {"last_status", "last_error", "section"}.issubset(columns):
+                result["dead_letter_reasons"] = [
+                    {
+                        "status": int(status) if status is not None else None,
+                        "reason": str(reason or "unknown")[:128],
+                        "count": int(count),
+                        "protected_bytes": int(protected_bytes or 0),
+                    }
+                    for status, reason, count, protected_bytes in conn.execute(
+                        """
+                        SELECT last_status,
+                               CASE
+                                 WHEN INSTR(last_error, ':') > 0
+                                 THEN SUBSTR(last_error, 1, INSTR(last_error, ':') - 1)
+                                 WHEN last_error = '' THEN 'unknown'
+                                 ELSE last_error
+                               END AS reason_code,
+                               COUNT(*), SUM(LENGTH(protected_payload))
+                        FROM outbox WHERE state='dead'
+                        GROUP BY last_status, reason_code
+                        ORDER BY COUNT(*) DESC
+                        """
+                    ).fetchall()
+                ]
+                result["dead_letter_sections"] = [
+                    {
+                        "section": str(section),
+                        "count": int(count),
+                        "protected_bytes": int(protected_bytes or 0),
+                    }
+                    for section, count, protected_bytes in conn.execute(
+                        """
+                        SELECT section, COUNT(*), SUM(LENGTH(protected_payload))
+                        FROM outbox WHERE state='dead'
+                        GROUP BY section ORDER BY COUNT(*) DESC
+                        """
+                    ).fetchall()
+                ]
         else:
             result["states"] = {"unknown": int(
                 conn.execute("SELECT COUNT(*) FROM outbox").fetchone()[0]
@@ -86,6 +124,10 @@ def _service_status(name: str) -> dict[str, Any]:
             "state": state_names.get(status[1], f"state_{status[1]}"),
             "win32_exit_code": int(status[3]),
         })
+        if name == "AttackLensAgent":
+            from agent.os.windows.boot_persistence import enforce_service_policy
+
+            result["policy"] = enforce_service_policy(repair=False)
     except Exception as exc:
         result["reason"] = f"{type(exc).__name__}: {exc}"
     return result
@@ -107,6 +149,11 @@ def capability_report(cfg: dict[str, Any]) -> dict[str, Any]:
         service_api = True
     except ImportError:
         service_api = False
+    try:
+        import etw  # noqa: F401
+        etw_api = True
+    except ImportError:
+        etw_api = False
 
     manager = cfg.get("manager", {})
     return {
@@ -139,15 +186,32 @@ def capability_report(cfg: dict[str, Any]) -> dict[str, Any]:
         },
         "telemetry": {
             "native_eventlog_api": eventlog_api,
-            "eventlog_checkpoint_per_channel": True,
+            "eventlog_push_subscription": eventlog_api,
+            "eventlog_checkpoint_per_channel": eventlog_api,
             "security_channel": True,
             "powershell_channel": True,
             "defender_channel": True,
             "sysmon_channel": True,
             "terminal_services_channel": True,
             "wmi_activity_channel": True,
-            "realtime_etw_session": False,
+            "realtime_etw_session": etw_api,
+            "etw_kernel_process": etw_api,
+            "etw_dns_client": etw_api,
             "threat_intelligence_provider": False,
+        },
+        "persistence": {
+            "native_inventory": True,
+            "transactional_baseline": True,
+            "run_keys_both_registry_views": True,
+            "scheduled_tasks_com": True,
+            "services_and_drivers_scm": True,
+            "wmi_permanent_subscriptions": True,
+            "ifeo_com_appinit_winlogon": True,
+        },
+        "posture": {
+            "windows_cis_checks": 46,
+            "tri_state_feature_detection": True,
+            "locale_independent_native_probes": True,
         },
         "process_visibility": {
             "command_line": True,
@@ -199,6 +263,26 @@ def status_report(cfg: dict[str, Any]) -> dict[str, Any]:
         if runtime and runtime.get("updated_at")
         else None
     )
+    security_dir = Path(cfg["paths"]["security_dir"])
+    agent_id = str(cfg.get("agent", {}).get("id") or "")
+    safe_id = "".join(character for character in agent_id if character.isalnum() or character in "-_")
+    credential = {
+        "configured": False,
+        "backend": "none_detected",
+        "security_dir_exists": security_dir.is_dir(),
+        "note": "file-backed credential detection; Credential Manager is identity-scoped",
+    }
+    if safe_id and (security_dir / f"{safe_id}.key.dpapi").is_file():
+        credential.update({"configured": True, "backend": "dpapi_machine_file"})
+    elif safe_id and (security_dir / f"{safe_id}.key").is_file():
+        credential.update({"configured": True, "backend": "acl_file_fallback"})
+
+    last_contact = None
+    if runtime:
+        last_contact = (
+            runtime.get("health", {}).get("delivery", {}).get("last_success_at")
+            or runtime.get("delivery", {}).get("last_success_at")
+        )
     return {
         "generated_at": now,
         "agent_id": cfg.get("agent", {}).get("id"),
@@ -206,6 +290,8 @@ def status_report(cfg: dict[str, Any]) -> dict[str, Any]:
         "runtime": runtime,
         "runtime_error": runtime_error,
         "runtime_age_sec": runtime_age,
+        "last_manager_contact_at": last_contact,
+        "enrollment": credential,
         "outbox": _outbox_status(cfg["paths"]["spool_dir"]),
         "services": {
             "agent": _service_status("AttackLensAgent"),
@@ -274,6 +360,8 @@ def connectivity_test(
             tls_verify=manager.get("ca_bundle") or manager.get("tls_verify", True),
             timeout=(min(10, timeout), timeout),
             proxy_url=manager.get("proxy_url") or None,
+            proxy_pac_url=manager.get("proxy_pac_url") or None,
+            proxy_auto_detect=bool(manager.get("proxy_auto_detect", True)),
         )
         response = transport.get("/health")
         body: Any = None

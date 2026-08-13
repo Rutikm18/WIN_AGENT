@@ -1,6 +1,6 @@
 # AttackLens Windows Agent — Installation Guide
 
-> Startup incident guidance was updated on 2026-08-09 and consolidated in [`advanced_support/`](advanced_support/README.md).
+> Current package: `pkg\dist\attacklens-agent-2.0.19-x64.msi`; authoritative status and SHA-256 are in [CURRENT_IMPLEMENTATION.md](CURRENT_IMPLEMENTATION.md). Historical 2.0.10–2.0.13 sections explain earlier fixes and are not the recommended artifact. Startup tooling is in [`advanced_support/`](advanced_support/README.md).
 
 **Applies to:** v2.0+  
 **Last updated:** 2026-05-25

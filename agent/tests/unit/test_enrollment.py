@@ -53,36 +53,45 @@ class TestNeedsEnrollment:
 # ── enroll ────────────────────────────────────────────────────────────────────
 
 class TestEnroll:
-    def test_fails_without_token(self, tmp_path):
-        with pytest.raises(EnrollmentError, match="enrollment token"):
-            enroll(_cfg(tmp_path, token=""))
+    def test_open_enrollment_omits_token(self, tmp_path):
+        manager_key = "a" * 64
+        with patch("agent.agent.enrollment._post_enroll",
+                   return_value={"api_key": manager_key}) as post:
+            with patch("agent.agent.enrollment.store_key"):
+                assert enroll(_cfg(tmp_path, token="")) == manager_key
+        assert post.call_args.kwargs["token"] == ""
 
-    def test_generated_key_is_256_bits(self, tmp_path):
-        with patch("agent.agent.enrollment._post_enroll"):
+    def test_manager_key_is_256_bits(self, tmp_path):
+        manager_key = "b" * 64
+        with patch("agent.agent.enrollment._post_enroll",
+                   return_value={"api_key": manager_key}):
             with patch("agent.agent.enrollment.store_key"):
                 key = enroll(_cfg(tmp_path))
         assert len(key) == 64, "256-bit key = 64 hex characters"
         assert all(c in "0123456789abcdef" for c in key)
 
-    def test_key_stored_before_network_call(self, tmp_path):
+    def test_key_stored_after_network_call(self, tmp_path):
         """
-        Critical invariant: key must be persisted before the HTTP request so
-        it is never lost if the network call fails.
+        The manager issues the credential, so it can only be persisted after
+        a successful response.
         """
         order: list[str] = []
         with patch("agent.agent.enrollment.store_key",
                    side_effect=lambda *a, **kw: order.append("store")):
             with patch("agent.agent.enrollment._post_enroll",
-                       side_effect=lambda *a, **kw: order.append("post")):
+                       side_effect=lambda *a, **kw: (
+                           order.append("post") or {"api_key": "c" * 64}
+                       )):
                 enroll(_cfg(tmp_path))
-        assert order == ["store", "post"], \
-            "Key MUST be stored before the network call"
+        assert order == ["post", "store"]
 
     def test_keystore_failure_raises_enrollment_error(self, tmp_path):
-        with patch("agent.agent.enrollment.store_key",
-                   side_effect=PermissionError("disk full")):
-            with pytest.raises(EnrollmentError, match="Keystore"):
-                enroll(_cfg(tmp_path))
+        with patch("agent.agent.enrollment._post_enroll",
+                   return_value={"api_key": "d" * 64}):
+            with patch("agent.agent.enrollment.store_key",
+                       side_effect=PermissionError("disk full")):
+                with pytest.raises(EnrollmentError, match="Keystore"):
+                    enroll(_cfg(tmp_path))
 
     def test_network_failure_raises_enrollment_error(self, tmp_path):
         with patch("agent.agent.enrollment.store_key"):
@@ -105,13 +114,38 @@ class TestEnroll:
                 with pytest.raises(EnrollmentError):
                     enroll(_cfg(tmp_path))
 
-    def test_each_enrollment_generates_unique_key(self, tmp_path):
+    @pytest.mark.parametrize("response", [
+        None,
+        [],
+        {},
+        {"api_key": "short"},
+        {"api_key": "z" * 64},
+    ])
+    def test_malformed_manager_key_fails_before_storage(self, tmp_path, response):
+        with patch("agent.agent.enrollment._post_enroll", return_value=response):
+            with patch("agent.agent.enrollment.store_key") as store:
+                with pytest.raises(EnrollmentError, match="response|api_key"):
+                    enroll(_cfg(tmp_path))
+        store.assert_not_called()
+
+    def test_invalid_expiry_does_not_break_successful_enrollment(self, tmp_path):
+        manager_key = "e" * 64
+        with patch("agent.agent.enrollment._post_enroll", return_value={
+            "api_key": manager_key,
+            "expires_at": "not-a-timestamp",
+        }):
+            with patch("agent.agent.enrollment.store_key"):
+                assert enroll(_cfg(tmp_path)) == manager_key
+
+    def test_each_manager_key_is_preserved(self, tmp_path):
         keys = set()
         for i in range(5):
-            with patch("agent.agent.enrollment._post_enroll"):
+            manager_key = f"{i:064x}"
+            with patch("agent.agent.enrollment._post_enroll",
+                       return_value={"api_key": manager_key}):
                 with patch("agent.agent.enrollment.store_key"):
                     keys.add(enroll(_cfg(tmp_path)))
-        assert len(keys) == 5, "Each enrollment must produce a unique key"
+        assert keys == {f"{i:064x}" for i in range(5)}
 
 
 # ── _post_enroll (network layer) ──────────────────────────────────────────────

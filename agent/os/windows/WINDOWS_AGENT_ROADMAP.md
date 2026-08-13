@@ -1,5 +1,7 @@
 # Windows Agent Development and Test Roadmap
 
+> Current milestone closure and remaining external gates: [CURRENT_IMPLEMENTATION.md](CURRENT_IMPLEMENTATION.md). Phases 0–3 and the in-agent Phase 4 diagnostics/self-defense work are implemented; signing/PPL and enterprise VM deployment validation remain external gates.
+
 > Implemented startup recovery and remaining operator stop conditions are consolidated in [`advanced_support/`](advanced_support/README.md).
 
 Scope: `PROJECT_CORE/agent/os/windows/`

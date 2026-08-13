@@ -541,6 +541,9 @@ enabled = true; interval_sec = 300
 [collection.sections.eventlog]
 enabled = true; interval_sec = 300
 
+[collection.sections.developer_security]
+enabled = true; interval_sec = 3600
+
 [collection.sections.security_audit]
 enabled = true; interval_sec = 21600
 

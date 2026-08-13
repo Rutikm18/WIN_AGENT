@@ -1,5 +1,7 @@
 # Reference architecture decisions
 
+> Current implementation mapping and verification: [../CURRENT_IMPLEMENTATION.md](../CURRENT_IMPLEMENTATION.md).
+
 The Windows layout follows Windows common-application-data conventions and
 operational patterns documented by established endpoint-agent vendors.
 

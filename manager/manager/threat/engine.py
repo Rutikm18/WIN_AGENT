@@ -39,6 +39,7 @@ from .rules import (
 from .behavioral import BehavioralAnalyzer
 from .feeds      import FeedManager
 from .nvd        import CVELookup
+from ..persistence_analysis import analyze_persistence
 
 log = logging.getLogger("manager.threat.engine")
 
@@ -110,6 +111,7 @@ class ThreatEngine:
             "security":    self._security,
             "configs":     self._configs,
             "binaries":    self._binaries,
+            "persistence": self._persistence,
         }.get(section)
         if fn is None:
             return []
@@ -519,6 +521,10 @@ class ThreatEngine:
                     mitre="T1222", tags=["binary", "world_writable"],
                 ))
         return findings
+
+    async def _persistence(self, agent_id: str, data: list) -> list[dict]:
+        del agent_id
+        return analyze_persistence(data, self._finding)
 
     # ── Background workers ─────────────────────────────────────────────────────
 

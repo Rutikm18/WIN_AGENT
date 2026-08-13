@@ -45,3 +45,22 @@ build/
 bandit-report.json
 *-audit.json
 sast-report.json
+
+# Windows agent source and documentation are first-class repository content.
+# Ignore only generated/runtime artifacts; never hide newly added collectors,
+# service modules, tests, or operator documentation.
+agent/os/windows/**/__pycache__/
+agent/os/windows/run/
+agent/os/windows/installer/build/
+agent/os/windows/pkg/build/
+agent/os/windows/pkg/dist/
+agent/os/windows/pkg/qa-extract-*/
+agent/os/windows/pkg/*.msi
+agent/os/windows/pkg/*.wixobj
+agent/os/windows/phase*.log
+agent/os/windows/phase*.json
+agent/os/windows/phase*.txt
+agent/os/windows/pkg/*.stdout.log
+agent/os/windows/pkg/*.stderr.log
+agent/run/
+.wix/

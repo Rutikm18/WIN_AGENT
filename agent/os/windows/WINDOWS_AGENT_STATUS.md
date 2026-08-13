@@ -1,5 +1,7 @@
 # Windows Agent Roadmap Status
 
+> Superseded current status (2026-08-12): [CURRENT_IMPLEMENTATION.md](CURRENT_IMPLEMENTATION.md). The current implementation has 26 scheduled sections, native ETW and Event Log streaming, persistence baseline/detection, 46 CIS checks, and runtime self-defense; build 2.0.19 is the latest verified development MSI.
+
 > Startup resilience status was updated on 2026-08-09; see [`advanced_support/`](advanced_support/README.md).
 
 Updated: 2026-07-27

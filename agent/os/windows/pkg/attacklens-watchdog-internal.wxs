@@ -35,6 +35,9 @@
       <Directory Id="wd_d_psutil" Name="psutil" />
     </DirectoryRef>
     <DirectoryRef Id="WATCHDOGINTERNALDIR">
+      <Directory Id="wd_d_pythonwin" Name="pythonwin" />
+    </DirectoryRef>
+    <DirectoryRef Id="WATCHDOGINTERNALDIR">
       <Directory Id="wd_d_pywin32_system32" Name="pywin32_system32" />
     </DirectoryRef>
     <DirectoryRef Id="WATCHDOGINTERNALDIR">
@@ -206,76 +209,91 @@
       <Component Id="wd_c_python313_dll" Directory="WATCHDOGINTERNALDIR" Guid="{57ba26c8-6618-c090-d9b0-7ffc6e0ab384}">
         <File Id="wd_f_python313_dll" Name="python313.dll" Source="E:\Project - AttacklensAgentwork\PROJECT_CORE\agent\os\windows\pkg\dist\attacklens-watchdog\_internal\python313.dll" KeyPath="yes" />
       </Component>
-      <Component Id="wd_c_pywin32_system32_pywintypes313_dll" Directory="wd_d_pywin32_system32" Guid="{aa585cf2-c824-b8ef-3f67-b3b17635b141}">
+      <Component Id="wd_c_pythonwin_win32ui_pyd" Directory="wd_d_pythonwin" Guid="{efcc0816-a52d-cffe-1b7c-0ad9c01b719d}">
+        <File Id="wd_f_pythonwin_win32ui_pyd" Name="win32ui.pyd" Source="E:\Project - AttacklensAgentwork\PROJECT_CORE\agent\os\windows\pkg\dist\attacklens-watchdog\_internal\pythonwin\win32ui.pyd" KeyPath="yes" />
+      </Component>
+      <Component Id="wd_c_pywin32_system32_pythoncom313_dll" Directory="wd_d_pywin32_system32" Guid="{11be876a-1c1a-eab8-f85b-1ce1239e94d0}">
+        <File Id="wd_f_pywin32_system32_pythoncom313_dll" Name="pythoncom313.dll" Source="E:\Project - AttacklensAgentwork\PROJECT_CORE\agent\os\windows\pkg\dist\attacklens-watchdog\_internal\pywin32_system32\pythoncom313.dll" KeyPath="yes" />
+      </Component>
+      <Component Id="wd_c_pywin32_system32_pywintypes313_dll" Directory="wd_d_pywin32_system32" Guid="{d786d97f-aeaf-7077-bba4-f8781bfed119}">
         <File Id="wd_f_pywin32_system32_pywintypes313_dll" Name="pywintypes313.dll" Source="E:\Project - AttacklensAgentwork\PROJECT_CORE\agent\os\windows\pkg\dist\attacklens-watchdog\_internal\pywin32_system32\pywintypes313.dll" KeyPath="yes" />
       </Component>
-      <Component Id="wd_c_select_pyd" Directory="WATCHDOGINTERNALDIR" Guid="{1accd6af-6993-2ab2-6b12-87cdc555f45a}">
+      <Component Id="wd_c_select_pyd" Directory="WATCHDOGINTERNALDIR" Guid="{6f3f8b85-579f-63e4-a1fa-96df1d7fedd0}">
         <File Id="wd_f_select_pyd" Name="select.pyd" Source="E:\Project - AttacklensAgentwork\PROJECT_CORE\agent\os\windows\pkg\dist\attacklens-watchdog\_internal\select.pyd" KeyPath="yes" />
       </Component>
-      <Component Id="wd_c_setuptools__vendor_importlib_metadata_8_7_1_dist_inf_1c466f64" Directory="wd_d_setuptools__vendor_importlib_metadata_8_7_1_dist_info" Guid="{30cdd80c-ad83-10a6-2363-1b3568fa68dc}">
+      <Component Id="wd_c_setuptools__vendor_importlib_metadata_8_7_1_dist_inf_1c466f64" Directory="wd_d_setuptools__vendor_importlib_metadata_8_7_1_dist_info" Guid="{8f23ccc6-a8fc-adb8-2b14-00d11760dae5}">
         <File Id="wd_f_setuptools__vendor_importlib_metadata_8_7_1_dist_inf_1c466f64" Name="INSTALLER" Source="E:\Project - AttacklensAgentwork\PROJECT_CORE\agent\os\windows\pkg\dist\attacklens-watchdog\_internal\setuptools\_vendor\importlib_metadata-8.7.1.dist-info\INSTALLER" KeyPath="yes" />
       </Component>
-      <Component Id="wd_c_setuptools__vendor_importlib_metadata_8_7_1_dist_inf_ee7e82d8" Directory="wd_d_setuptools__vendor_importlib_metadata_8_7_1_dist_inf_83b8f021" Guid="{12565f8e-1ff9-b889-fd80-d11744180d88}">
+      <Component Id="wd_c_setuptools__vendor_importlib_metadata_8_7_1_dist_inf_ee7e82d8" Directory="wd_d_setuptools__vendor_importlib_metadata_8_7_1_dist_inf_83b8f021" Guid="{84709796-3dc7-f76e-bee1-883c4fc0e8b6}">
         <File Id="wd_f_setuptools__vendor_importlib_metadata_8_7_1_dist_inf_ee7e82d8" Name="LICENSE" Source="E:\Project - AttacklensAgentwork\PROJECT_CORE\agent\os\windows\pkg\dist\attacklens-watchdog\_internal\setuptools\_vendor\importlib_metadata-8.7.1.dist-info\licenses\LICENSE" KeyPath="yes" />
       </Component>
-      <Component Id="wd_c_setuptools__vendor_importlib_metadata_8_7_1_dist_inf_6c870851" Directory="wd_d_setuptools__vendor_importlib_metadata_8_7_1_dist_info" Guid="{43e28a8a-5645-3d61-30a5-0e189c1d0c96}">
+      <Component Id="wd_c_setuptools__vendor_importlib_metadata_8_7_1_dist_inf_6c870851" Directory="wd_d_setuptools__vendor_importlib_metadata_8_7_1_dist_info" Guid="{819c5106-2202-d072-8cad-a846c435bb77}">
         <File Id="wd_f_setuptools__vendor_importlib_metadata_8_7_1_dist_inf_6c870851" Name="METADATA" Source="E:\Project - AttacklensAgentwork\PROJECT_CORE\agent\os\windows\pkg\dist\attacklens-watchdog\_internal\setuptools\_vendor\importlib_metadata-8.7.1.dist-info\METADATA" KeyPath="yes" />
       </Component>
-      <Component Id="wd_c_setuptools__vendor_importlib_metadata_8_7_1_dist_info_RECORD" Directory="wd_d_setuptools__vendor_importlib_metadata_8_7_1_dist_info" Guid="{2f32aa08-f525-169b-b330-c6de62d7e742}">
+      <Component Id="wd_c_setuptools__vendor_importlib_metadata_8_7_1_dist_info_RECORD" Directory="wd_d_setuptools__vendor_importlib_metadata_8_7_1_dist_info" Guid="{012e69d3-3ab4-f0da-5579-150391813066}">
         <File Id="wd_f_setuptools__vendor_importlib_metadata_8_7_1_dist_info_RECORD" Name="RECORD" Source="E:\Project - AttacklensAgentwork\PROJECT_CORE\agent\os\windows\pkg\dist\attacklens-watchdog\_internal\setuptools\_vendor\importlib_metadata-8.7.1.dist-info\RECORD" KeyPath="yes" />
       </Component>
-      <Component Id="wd_c_setuptools__vendor_importlib_metadata_8_7_1_dist_inf_c17c8579" Directory="wd_d_setuptools__vendor_importlib_metadata_8_7_1_dist_info" Guid="{bc9460e2-ff60-6a5f-364f-64f143e1059a}">
+      <Component Id="wd_c_setuptools__vendor_importlib_metadata_8_7_1_dist_inf_c17c8579" Directory="wd_d_setuptools__vendor_importlib_metadata_8_7_1_dist_info" Guid="{dec3f166-560d-55ed-1de5-6f3e3c3d59b4}">
         <File Id="wd_f_setuptools__vendor_importlib_metadata_8_7_1_dist_inf_c17c8579" Name="REQUESTED" Source="E:\Project - AttacklensAgentwork\PROJECT_CORE\agent\os\windows\pkg\dist\attacklens-watchdog\_internal\setuptools\_vendor\importlib_metadata-8.7.1.dist-info\REQUESTED" KeyPath="yes" />
       </Component>
-      <Component Id="wd_c_setuptools__vendor_importlib_metadata_8_7_1_dist_inf_1280fb66" Directory="wd_d_setuptools__vendor_importlib_metadata_8_7_1_dist_info" Guid="{affc6eda-4219-6efa-e774-4df72f18ad73}">
+      <Component Id="wd_c_setuptools__vendor_importlib_metadata_8_7_1_dist_inf_1280fb66" Directory="wd_d_setuptools__vendor_importlib_metadata_8_7_1_dist_info" Guid="{0b56a6c1-f02c-29d1-1809-0516b463b914}">
         <File Id="wd_f_setuptools__vendor_importlib_metadata_8_7_1_dist_inf_1280fb66" Name="top_level.txt" Source="E:\Project - AttacklensAgentwork\PROJECT_CORE\agent\os\windows\pkg\dist\attacklens-watchdog\_internal\setuptools\_vendor\importlib_metadata-8.7.1.dist-info\top_level.txt" KeyPath="yes" />
       </Component>
-      <Component Id="wd_c_setuptools__vendor_importlib_metadata_8_7_1_dist_info_WHEEL" Directory="wd_d_setuptools__vendor_importlib_metadata_8_7_1_dist_info" Guid="{bad1b679-413e-b4e0-716a-af29fc31d7e1}">
+      <Component Id="wd_c_setuptools__vendor_importlib_metadata_8_7_1_dist_info_WHEEL" Directory="wd_d_setuptools__vendor_importlib_metadata_8_7_1_dist_info" Guid="{17b19d68-7ef3-4093-9698-c0c97c4a061f}">
         <File Id="wd_f_setuptools__vendor_importlib_metadata_8_7_1_dist_info_WHEEL" Name="WHEEL" Source="E:\Project - AttacklensAgentwork\PROJECT_CORE\agent\os\windows\pkg\dist\attacklens-watchdog\_internal\setuptools\_vendor\importlib_metadata-8.7.1.dist-info\WHEEL" KeyPath="yes" />
       </Component>
-      <Component Id="wd_c_setuptools__vendor_jaraco_text_Lorem_ipsum_txt" Directory="wd_d_setuptools__vendor_jaraco_text" Guid="{3edd1ffe-957e-481c-6008-ed8b0823f16b}">
+      <Component Id="wd_c_setuptools__vendor_jaraco_text_Lorem_ipsum_txt" Directory="wd_d_setuptools__vendor_jaraco_text" Guid="{ad0671f1-513e-ae6b-caa7-176076e72350}">
         <File Id="wd_f_setuptools__vendor_jaraco_text_Lorem_ipsum_txt" Name="Lorem ipsum.txt" Source="E:\Project - AttacklensAgentwork\PROJECT_CORE\agent\os\windows\pkg\dist\attacklens-watchdog\_internal\setuptools\_vendor\jaraco\text\Lorem ipsum.txt" KeyPath="yes" />
       </Component>
-      <Component Id="wd_c_sqlite3_dll" Directory="WATCHDOGINTERNALDIR" Guid="{bce5c12d-4080-ef56-d735-a5c4b94a34f3}">
+      <Component Id="wd_c_sqlite3_dll" Directory="WATCHDOGINTERNALDIR" Guid="{db342eb1-f9b1-c6eb-dce7-3b755bd8d8b6}">
         <File Id="wd_f_sqlite3_dll" Name="sqlite3.dll" Source="E:\Project - AttacklensAgentwork\PROJECT_CORE\agent\os\windows\pkg\dist\attacklens-watchdog\_internal\sqlite3.dll" KeyPath="yes" />
       </Component>
-      <Component Id="wd_c_unicodedata_pyd" Directory="WATCHDOGINTERNALDIR" Guid="{c1a01967-f3af-0432-19d3-8c0366d42c58}">
+      <Component Id="wd_c_unicodedata_pyd" Directory="WATCHDOGINTERNALDIR" Guid="{75df4d29-4621-e68a-77d1-271d309eb1ea}">
         <File Id="wd_f_unicodedata_pyd" Name="unicodedata.pyd" Source="E:\Project - AttacklensAgentwork\PROJECT_CORE\agent\os\windows\pkg\dist\attacklens-watchdog\_internal\unicodedata.pyd" KeyPath="yes" />
       </Component>
-      <Component Id="wd_c_VCRUNTIME140_dll" Directory="WATCHDOGINTERNALDIR" Guid="{b93abea1-81e3-6602-d076-41a8cec15a33}">
+      <Component Id="wd_c_VCRUNTIME140_dll" Directory="WATCHDOGINTERNALDIR" Guid="{aeb8c97d-9a36-9c08-19ce-8bb4c90e281a}">
         <File Id="wd_f_VCRUNTIME140_dll" Name="VCRUNTIME140.dll" Source="E:\Project - AttacklensAgentwork\PROJECT_CORE\agent\os\windows\pkg\dist\attacklens-watchdog\_internal\VCRUNTIME140.dll" KeyPath="yes" />
       </Component>
-      <Component Id="wd_c_VCRUNTIME140_1_dll" Directory="WATCHDOGINTERNALDIR" Guid="{52a6e6d5-c31a-8f32-3f9d-70af09f26bf6}">
+      <Component Id="wd_c_VCRUNTIME140_1_dll" Directory="WATCHDOGINTERNALDIR" Guid="{1d1acefc-a166-5100-fa8a-176a5b4f32a5}">
         <File Id="wd_f_VCRUNTIME140_1_dll" Name="VCRUNTIME140_1.dll" Source="E:\Project - AttacklensAgentwork\PROJECT_CORE\agent\os\windows\pkg\dist\attacklens-watchdog\_internal\VCRUNTIME140_1.dll" KeyPath="yes" />
       </Component>
-      <Component Id="wd_c_win32__win32sysloader_pyd" Directory="wd_d_win32" Guid="{a575172a-ab24-09b5-4dd8-a0c1fa19fc57}">
+      <Component Id="wd_c_win32__win32sysloader_pyd" Directory="wd_d_win32" Guid="{e5b16478-7491-14c5-0d0d-906508e0a449}">
         <File Id="wd_f_win32__win32sysloader_pyd" Name="_win32sysloader.pyd" Source="E:\Project - AttacklensAgentwork\PROJECT_CORE\agent\os\windows\pkg\dist\attacklens-watchdog\_internal\win32\_win32sysloader.pyd" KeyPath="yes" />
       </Component>
-      <Component Id="wd_c_win32_perfmon_pyd" Directory="wd_d_win32" Guid="{7aeeeb29-1015-ec42-10ca-68a77980e356}">
+      <Component Id="wd_c_win32_perfmon_pyd" Directory="wd_d_win32" Guid="{e638851b-ceef-b803-6256-b8efef967328}">
         <File Id="wd_f_win32_perfmon_pyd" Name="perfmon.pyd" Source="E:\Project - AttacklensAgentwork\PROJECT_CORE\agent\os\windows\pkg\dist\attacklens-watchdog\_internal\win32\perfmon.pyd" KeyPath="yes" />
       </Component>
-      <Component Id="wd_c_win32_servicemanager_pyd" Directory="wd_d_win32" Guid="{bac5f71c-ddf9-bc50-0ae4-61639f7b9ad7}">
+      <Component Id="wd_c_win32_servicemanager_pyd" Directory="wd_d_win32" Guid="{853aa018-698b-6ada-3653-ccbb6f6c436e}">
         <File Id="wd_f_win32_servicemanager_pyd" Name="servicemanager.pyd" Source="E:\Project - AttacklensAgentwork\PROJECT_CORE\agent\os\windows\pkg\dist\attacklens-watchdog\_internal\win32\servicemanager.pyd" KeyPath="yes" />
       </Component>
-      <Component Id="wd_c_win32_win32api_pyd" Directory="wd_d_win32" Guid="{b7550064-8334-813e-b885-d5f09fcd0c81}">
+      <Component Id="wd_c_win32_win32api_pyd" Directory="wd_d_win32" Guid="{41fcd6d3-5336-0d90-bcd9-16c37840a31c}">
         <File Id="wd_f_win32_win32api_pyd" Name="win32api.pyd" Source="E:\Project - AttacklensAgentwork\PROJECT_CORE\agent\os\windows\pkg\dist\attacklens-watchdog\_internal\win32\win32api.pyd" KeyPath="yes" />
       </Component>
-      <Component Id="wd_c_win32_win32cred_pyd" Directory="wd_d_win32" Guid="{fdbe1e90-d9cc-3765-b271-f2df05fed3ae}">
+      <Component Id="wd_c_win32_win32cred_pyd" Directory="wd_d_win32" Guid="{d9e11a57-cd49-e06d-a89e-0d12fd3eab11}">
         <File Id="wd_f_win32_win32cred_pyd" Name="win32cred.pyd" Source="E:\Project - AttacklensAgentwork\PROJECT_CORE\agent\os\windows\pkg\dist\attacklens-watchdog\_internal\win32\win32cred.pyd" KeyPath="yes" />
       </Component>
-      <Component Id="wd_c_win32_win32crypt_pyd" Directory="wd_d_win32" Guid="{4ba4403a-dc10-d5b8-50c3-93eaff46f385}">
+      <Component Id="wd_c_win32_win32crypt_pyd" Directory="wd_d_win32" Guid="{f2d2e6e7-7380-855e-af7e-87c77b45f19b}">
         <File Id="wd_f_win32_win32crypt_pyd" Name="win32crypt.pyd" Source="E:\Project - AttacklensAgentwork\PROJECT_CORE\agent\os\windows\pkg\dist\attacklens-watchdog\_internal\win32\win32crypt.pyd" KeyPath="yes" />
       </Component>
-      <Component Id="wd_c_win32_win32event_pyd" Directory="wd_d_win32" Guid="{5341a1ee-cb43-f372-0c9f-0578e20e4bbc}">
+      <Component Id="wd_c_win32_win32event_pyd" Directory="wd_d_win32" Guid="{da62bb80-5555-b6ca-edd1-b7114783eabe}">
         <File Id="wd_f_win32_win32event_pyd" Name="win32event.pyd" Source="E:\Project - AttacklensAgentwork\PROJECT_CORE\agent\os\windows\pkg\dist\attacklens-watchdog\_internal\win32\win32event.pyd" KeyPath="yes" />
       </Component>
-      <Component Id="wd_c_win32_win32evtlog_pyd" Directory="wd_d_win32" Guid="{bd986562-6b72-fa57-46d3-0f2775880d75}">
+      <Component Id="wd_c_win32_win32evtlog_pyd" Directory="wd_d_win32" Guid="{ae6bd41d-789c-4cfe-c5e2-341926f0d0f2}">
         <File Id="wd_f_win32_win32evtlog_pyd" Name="win32evtlog.pyd" Source="E:\Project - AttacklensAgentwork\PROJECT_CORE\agent\os\windows\pkg\dist\attacklens-watchdog\_internal\win32\win32evtlog.pyd" KeyPath="yes" />
       </Component>
-      <Component Id="wd_c_win32_win32service_pyd" Directory="wd_d_win32" Guid="{6847dc10-a0da-8738-2d4b-8b25d140faac}">
+      <Component Id="wd_c_win32_win32net_pyd" Directory="wd_d_win32" Guid="{4bbaf2f6-95b5-3e65-bf96-2a3730ae95d7}">
+        <File Id="wd_f_win32_win32net_pyd" Name="win32net.pyd" Source="E:\Project - AttacklensAgentwork\PROJECT_CORE\agent\os\windows\pkg\dist\attacklens-watchdog\_internal\win32\win32net.pyd" KeyPath="yes" />
+      </Component>
+      <Component Id="wd_c_win32_win32security_pyd" Directory="wd_d_win32" Guid="{2fcccb55-e1b2-3c51-1a28-383f2738159a}">
+        <File Id="wd_f_win32_win32security_pyd" Name="win32security.pyd" Source="E:\Project - AttacklensAgentwork\PROJECT_CORE\agent\os\windows\pkg\dist\attacklens-watchdog\_internal\win32\win32security.pyd" KeyPath="yes" />
+      </Component>
+      <Component Id="wd_c_win32_win32service_pyd" Directory="wd_d_win32" Guid="{4d630399-caa3-6161-3713-36726ab7cbd4}">
         <File Id="wd_f_win32_win32service_pyd" Name="win32service.pyd" Source="E:\Project - AttacklensAgentwork\PROJECT_CORE\agent\os\windows\pkg\dist\attacklens-watchdog\_internal\win32\win32service.pyd" KeyPath="yes" />
       </Component>
-      <Component Id="wd_c_yaml__yaml_cp313_win_amd64_pyd" Directory="wd_d_yaml" Guid="{22d7bf2d-6a64-cbb4-984a-2e86b66847ac}">
+      <Component Id="wd_c_win32_win32trace_pyd" Directory="wd_d_win32" Guid="{ab6b4e0a-0b98-152d-a4e1-81af7de16d7d}">
+        <File Id="wd_f_win32_win32trace_pyd" Name="win32trace.pyd" Source="E:\Project - AttacklensAgentwork\PROJECT_CORE\agent\os\windows\pkg\dist\attacklens-watchdog\_internal\win32\win32trace.pyd" KeyPath="yes" />
+      </Component>
+      <Component Id="wd_c_yaml__yaml_cp313_win_amd64_pyd" Directory="wd_d_yaml" Guid="{31d81457-eb84-e0a1-79bc-45d0346cfd31}">
         <File Id="wd_f_yaml__yaml_cp313_win_amd64_pyd" Name="_yaml.cp313-win_amd64.pyd" Source="E:\Project - AttacklensAgentwork\PROJECT_CORE\agent\os\windows\pkg\dist\attacklens-watchdog\_internal\yaml\_yaml.cp313-win_amd64.pyd" KeyPath="yes" />
       </Component>
     </ComponentGroup>

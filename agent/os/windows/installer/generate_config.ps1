@@ -246,6 +246,8 @@ $sections = [ordered]@{
     sca         = @{ e=$true;  i=3600 }
     # Windows-only: reads Security + System Event Log channels
     eventlog    = @{ e=$true;  i=300   }
+    persistence = @{ e=$true; i=1800 }
+    developer_security = @{ e=$true; i=3600 }
     security_audit = @{ e=$true; i=21600 }
 }
 

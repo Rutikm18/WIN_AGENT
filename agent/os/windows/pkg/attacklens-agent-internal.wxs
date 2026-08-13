@@ -35,6 +35,9 @@
       <Directory Id="agt_d_psutil" Name="psutil" />
     </DirectoryRef>
     <DirectoryRef Id="AGENTINTERNALDIR">
+      <Directory Id="agt_d_pythonwin" Name="pythonwin" />
+    </DirectoryRef>
+    <DirectoryRef Id="AGENTINTERNALDIR">
       <Directory Id="agt_d_pywin32_system32" Name="pywin32_system32" />
     </DirectoryRef>
     <DirectoryRef Id="AGENTINTERNALDIR">
@@ -206,76 +209,91 @@
       <Component Id="agt_c_python313_dll" Directory="AGENTINTERNALDIR" Guid="{13d7e999-de1d-b4a5-c58a-687ed46a75ec}">
         <File Id="agt_f_python313_dll" Name="python313.dll" Source="E:\Project - AttacklensAgentwork\PROJECT_CORE\agent\os\windows\pkg\dist\attacklens-agent\_internal\python313.dll" KeyPath="yes" />
       </Component>
-      <Component Id="agt_c_pywin32_system32_pywintypes313_dll" Directory="agt_d_pywin32_system32" Guid="{9f989ed1-ca9f-3876-539d-fcf66b565e0f}">
+      <Component Id="agt_c_pythonwin_win32ui_pyd" Directory="agt_d_pythonwin" Guid="{1f7bd717-8fc9-c78e-840e-9a95868b7d0c}">
+        <File Id="agt_f_pythonwin_win32ui_pyd" Name="win32ui.pyd" Source="E:\Project - AttacklensAgentwork\PROJECT_CORE\agent\os\windows\pkg\dist\attacklens-agent\_internal\pythonwin\win32ui.pyd" KeyPath="yes" />
+      </Component>
+      <Component Id="agt_c_pywin32_system32_pythoncom313_dll" Directory="agt_d_pywin32_system32" Guid="{d11366ad-cdbb-ae22-cc55-2d0429f2e5d0}">
+        <File Id="agt_f_pywin32_system32_pythoncom313_dll" Name="pythoncom313.dll" Source="E:\Project - AttacklensAgentwork\PROJECT_CORE\agent\os\windows\pkg\dist\attacklens-agent\_internal\pywin32_system32\pythoncom313.dll" KeyPath="yes" />
+      </Component>
+      <Component Id="agt_c_pywin32_system32_pywintypes313_dll" Directory="agt_d_pywin32_system32" Guid="{52e02245-79e5-fdb5-be4f-50392c8de181}">
         <File Id="agt_f_pywin32_system32_pywintypes313_dll" Name="pywintypes313.dll" Source="E:\Project - AttacklensAgentwork\PROJECT_CORE\agent\os\windows\pkg\dist\attacklens-agent\_internal\pywin32_system32\pywintypes313.dll" KeyPath="yes" />
       </Component>
-      <Component Id="agt_c_select_pyd" Directory="AGENTINTERNALDIR" Guid="{8e7831e7-6419-cf83-6230-cee2d66e7c0c}">
+      <Component Id="agt_c_select_pyd" Directory="AGENTINTERNALDIR" Guid="{9524ad24-1ba6-5113-2d50-a246ebf3c609}">
         <File Id="agt_f_select_pyd" Name="select.pyd" Source="E:\Project - AttacklensAgentwork\PROJECT_CORE\agent\os\windows\pkg\dist\attacklens-agent\_internal\select.pyd" KeyPath="yes" />
       </Component>
-      <Component Id="agt_c_setuptools__vendor_importlib_metadata_8_7_1_dist_inf_1c466f64" Directory="agt_d_setuptools__vendor_importlib_metadata_8_7_1_dist_info" Guid="{3c0141a3-c3d5-3537-bc83-95d8c3d27497}">
+      <Component Id="agt_c_setuptools__vendor_importlib_metadata_8_7_1_dist_inf_1c466f64" Directory="agt_d_setuptools__vendor_importlib_metadata_8_7_1_dist_info" Guid="{c1f74a72-5ee2-ab3b-0e43-2bb407f08c6a}">
         <File Id="agt_f_setuptools__vendor_importlib_metadata_8_7_1_dist_inf_1c466f64" Name="INSTALLER" Source="E:\Project - AttacklensAgentwork\PROJECT_CORE\agent\os\windows\pkg\dist\attacklens-agent\_internal\setuptools\_vendor\importlib_metadata-8.7.1.dist-info\INSTALLER" KeyPath="yes" />
       </Component>
-      <Component Id="agt_c_setuptools__vendor_importlib_metadata_8_7_1_dist_inf_ee7e82d8" Directory="agt_d_setuptools__vendor_importlib_metadata_8_7_1_dist_inf_83b8f021" Guid="{5ac8c549-8fbd-8812-d6c0-56ac38722f6a}">
+      <Component Id="agt_c_setuptools__vendor_importlib_metadata_8_7_1_dist_inf_ee7e82d8" Directory="agt_d_setuptools__vendor_importlib_metadata_8_7_1_dist_inf_83b8f021" Guid="{8e85c9c4-991d-2a8c-cbdf-18d347b01640}">
         <File Id="agt_f_setuptools__vendor_importlib_metadata_8_7_1_dist_inf_ee7e82d8" Name="LICENSE" Source="E:\Project - AttacklensAgentwork\PROJECT_CORE\agent\os\windows\pkg\dist\attacklens-agent\_internal\setuptools\_vendor\importlib_metadata-8.7.1.dist-info\licenses\LICENSE" KeyPath="yes" />
       </Component>
-      <Component Id="agt_c_setuptools__vendor_importlib_metadata_8_7_1_dist_inf_6c870851" Directory="agt_d_setuptools__vendor_importlib_metadata_8_7_1_dist_info" Guid="{0cf2a51d-7055-93b1-d17d-ce07b8b2f131}">
+      <Component Id="agt_c_setuptools__vendor_importlib_metadata_8_7_1_dist_inf_6c870851" Directory="agt_d_setuptools__vendor_importlib_metadata_8_7_1_dist_info" Guid="{d998d565-987d-d20a-1633-b258a7ee8ba7}">
         <File Id="agt_f_setuptools__vendor_importlib_metadata_8_7_1_dist_inf_6c870851" Name="METADATA" Source="E:\Project - AttacklensAgentwork\PROJECT_CORE\agent\os\windows\pkg\dist\attacklens-agent\_internal\setuptools\_vendor\importlib_metadata-8.7.1.dist-info\METADATA" KeyPath="yes" />
       </Component>
-      <Component Id="agt_c_setuptools__vendor_importlib_metadata_8_7_1_dist_info_RECORD" Directory="agt_d_setuptools__vendor_importlib_metadata_8_7_1_dist_info" Guid="{a59b8e9f-8e28-2a55-499e-d82eed8de102}">
+      <Component Id="agt_c_setuptools__vendor_importlib_metadata_8_7_1_dist_info_RECORD" Directory="agt_d_setuptools__vendor_importlib_metadata_8_7_1_dist_info" Guid="{54cbc2c1-e1e7-0246-496c-b14d227ced31}">
         <File Id="agt_f_setuptools__vendor_importlib_metadata_8_7_1_dist_info_RECORD" Name="RECORD" Source="E:\Project - AttacklensAgentwork\PROJECT_CORE\agent\os\windows\pkg\dist\attacklens-agent\_internal\setuptools\_vendor\importlib_metadata-8.7.1.dist-info\RECORD" KeyPath="yes" />
       </Component>
-      <Component Id="agt_c_setuptools__vendor_importlib_metadata_8_7_1_dist_inf_c17c8579" Directory="agt_d_setuptools__vendor_importlib_metadata_8_7_1_dist_info" Guid="{851b4539-ea82-1c7a-ebba-0bd62659b1a8}">
+      <Component Id="agt_c_setuptools__vendor_importlib_metadata_8_7_1_dist_inf_c17c8579" Directory="agt_d_setuptools__vendor_importlib_metadata_8_7_1_dist_info" Guid="{e6ee7606-72ea-89c1-6520-330ceb0ecb8f}">
         <File Id="agt_f_setuptools__vendor_importlib_metadata_8_7_1_dist_inf_c17c8579" Name="REQUESTED" Source="E:\Project - AttacklensAgentwork\PROJECT_CORE\agent\os\windows\pkg\dist\attacklens-agent\_internal\setuptools\_vendor\importlib_metadata-8.7.1.dist-info\REQUESTED" KeyPath="yes" />
       </Component>
-      <Component Id="agt_c_setuptools__vendor_importlib_metadata_8_7_1_dist_inf_1280fb66" Directory="agt_d_setuptools__vendor_importlib_metadata_8_7_1_dist_info" Guid="{f8f4fb40-6600-3d2b-b85b-53ba87863b5b}">
+      <Component Id="agt_c_setuptools__vendor_importlib_metadata_8_7_1_dist_inf_1280fb66" Directory="agt_d_setuptools__vendor_importlib_metadata_8_7_1_dist_info" Guid="{d172bde9-a419-8bc2-8647-6d4253d1db41}">
         <File Id="agt_f_setuptools__vendor_importlib_metadata_8_7_1_dist_inf_1280fb66" Name="top_level.txt" Source="E:\Project - AttacklensAgentwork\PROJECT_CORE\agent\os\windows\pkg\dist\attacklens-agent\_internal\setuptools\_vendor\importlib_metadata-8.7.1.dist-info\top_level.txt" KeyPath="yes" />
       </Component>
-      <Component Id="agt_c_setuptools__vendor_importlib_metadata_8_7_1_dist_info_WHEEL" Directory="agt_d_setuptools__vendor_importlib_metadata_8_7_1_dist_info" Guid="{d0b2c599-4673-fc58-aaaa-4e08df3ca383}">
+      <Component Id="agt_c_setuptools__vendor_importlib_metadata_8_7_1_dist_info_WHEEL" Directory="agt_d_setuptools__vendor_importlib_metadata_8_7_1_dist_info" Guid="{0edc0bb0-3be4-55e7-1263-da1d45024d25}">
         <File Id="agt_f_setuptools__vendor_importlib_metadata_8_7_1_dist_info_WHEEL" Name="WHEEL" Source="E:\Project - AttacklensAgentwork\PROJECT_CORE\agent\os\windows\pkg\dist\attacklens-agent\_internal\setuptools\_vendor\importlib_metadata-8.7.1.dist-info\WHEEL" KeyPath="yes" />
       </Component>
-      <Component Id="agt_c_setuptools__vendor_jaraco_text_Lorem_ipsum_txt" Directory="agt_d_setuptools__vendor_jaraco_text" Guid="{bf1dc6ee-4ee9-5b0c-ee13-8ebc5fc8c792}">
+      <Component Id="agt_c_setuptools__vendor_jaraco_text_Lorem_ipsum_txt" Directory="agt_d_setuptools__vendor_jaraco_text" Guid="{d6dddc05-0d3c-981a-335d-3608d15f0916}">
         <File Id="agt_f_setuptools__vendor_jaraco_text_Lorem_ipsum_txt" Name="Lorem ipsum.txt" Source="E:\Project - AttacklensAgentwork\PROJECT_CORE\agent\os\windows\pkg\dist\attacklens-agent\_internal\setuptools\_vendor\jaraco\text\Lorem ipsum.txt" KeyPath="yes" />
       </Component>
-      <Component Id="agt_c_sqlite3_dll" Directory="AGENTINTERNALDIR" Guid="{97fb0e89-5df3-d3b2-1ec0-94e7d346025c}">
+      <Component Id="agt_c_sqlite3_dll" Directory="AGENTINTERNALDIR" Guid="{6189321a-a515-d3ae-4c6b-42cb6b071fbe}">
         <File Id="agt_f_sqlite3_dll" Name="sqlite3.dll" Source="E:\Project - AttacklensAgentwork\PROJECT_CORE\agent\os\windows\pkg\dist\attacklens-agent\_internal\sqlite3.dll" KeyPath="yes" />
       </Component>
-      <Component Id="agt_c_unicodedata_pyd" Directory="AGENTINTERNALDIR" Guid="{44d1a7f4-7508-42c2-e519-4ff90fc881a4}">
+      <Component Id="agt_c_unicodedata_pyd" Directory="AGENTINTERNALDIR" Guid="{00ab859b-c01e-79e2-fc4f-688835c75895}">
         <File Id="agt_f_unicodedata_pyd" Name="unicodedata.pyd" Source="E:\Project - AttacklensAgentwork\PROJECT_CORE\agent\os\windows\pkg\dist\attacklens-agent\_internal\unicodedata.pyd" KeyPath="yes" />
       </Component>
-      <Component Id="agt_c_VCRUNTIME140_dll" Directory="AGENTINTERNALDIR" Guid="{6ab0ef60-3ccb-1588-0bd8-a294804b8682}">
+      <Component Id="agt_c_VCRUNTIME140_dll" Directory="AGENTINTERNALDIR" Guid="{c2c8d20e-4b2c-1609-665a-7b062effeb5e}">
         <File Id="agt_f_VCRUNTIME140_dll" Name="VCRUNTIME140.dll" Source="E:\Project - AttacklensAgentwork\PROJECT_CORE\agent\os\windows\pkg\dist\attacklens-agent\_internal\VCRUNTIME140.dll" KeyPath="yes" />
       </Component>
-      <Component Id="agt_c_VCRUNTIME140_1_dll" Directory="AGENTINTERNALDIR" Guid="{091525d5-82ca-632c-b2e2-10907203e3ad}">
+      <Component Id="agt_c_VCRUNTIME140_1_dll" Directory="AGENTINTERNALDIR" Guid="{9f4c37f6-51f2-5888-be54-66f705750365}">
         <File Id="agt_f_VCRUNTIME140_1_dll" Name="VCRUNTIME140_1.dll" Source="E:\Project - AttacklensAgentwork\PROJECT_CORE\agent\os\windows\pkg\dist\attacklens-agent\_internal\VCRUNTIME140_1.dll" KeyPath="yes" />
       </Component>
-      <Component Id="agt_c_win32__win32sysloader_pyd" Directory="agt_d_win32" Guid="{3a69c4d9-bae0-342f-df4b-cdf6dee65d46}">
+      <Component Id="agt_c_win32__win32sysloader_pyd" Directory="agt_d_win32" Guid="{10b334c0-5f2b-676d-a3b6-343740fc2406}">
         <File Id="agt_f_win32__win32sysloader_pyd" Name="_win32sysloader.pyd" Source="E:\Project - AttacklensAgentwork\PROJECT_CORE\agent\os\windows\pkg\dist\attacklens-agent\_internal\win32\_win32sysloader.pyd" KeyPath="yes" />
       </Component>
-      <Component Id="agt_c_win32_perfmon_pyd" Directory="agt_d_win32" Guid="{6d5512ac-cab0-8155-2c28-d43b6715d54f}">
+      <Component Id="agt_c_win32_perfmon_pyd" Directory="agt_d_win32" Guid="{c0089a96-77d4-4002-29a9-6992bbfc4c4f}">
         <File Id="agt_f_win32_perfmon_pyd" Name="perfmon.pyd" Source="E:\Project - AttacklensAgentwork\PROJECT_CORE\agent\os\windows\pkg\dist\attacklens-agent\_internal\win32\perfmon.pyd" KeyPath="yes" />
       </Component>
-      <Component Id="agt_c_win32_servicemanager_pyd" Directory="agt_d_win32" Guid="{8f331d09-3916-b3ad-4902-c301ae40f3a4}">
+      <Component Id="agt_c_win32_servicemanager_pyd" Directory="agt_d_win32" Guid="{eae32774-e191-b901-7071-74b137036a75}">
         <File Id="agt_f_win32_servicemanager_pyd" Name="servicemanager.pyd" Source="E:\Project - AttacklensAgentwork\PROJECT_CORE\agent\os\windows\pkg\dist\attacklens-agent\_internal\win32\servicemanager.pyd" KeyPath="yes" />
       </Component>
-      <Component Id="agt_c_win32_win32api_pyd" Directory="agt_d_win32" Guid="{7fdf438d-17d3-0805-ea6b-2153330e5dff}">
+      <Component Id="agt_c_win32_win32api_pyd" Directory="agt_d_win32" Guid="{b34471ff-34a4-25ba-26bc-aafebff2d6cd}">
         <File Id="agt_f_win32_win32api_pyd" Name="win32api.pyd" Source="E:\Project - AttacklensAgentwork\PROJECT_CORE\agent\os\windows\pkg\dist\attacklens-agent\_internal\win32\win32api.pyd" KeyPath="yes" />
       </Component>
-      <Component Id="agt_c_win32_win32cred_pyd" Directory="agt_d_win32" Guid="{6208b0f1-e648-5d02-0196-d4d305b20b63}">
+      <Component Id="agt_c_win32_win32cred_pyd" Directory="agt_d_win32" Guid="{6d3c91b2-0d1e-c1c3-bf33-2694496a5c78}">
         <File Id="agt_f_win32_win32cred_pyd" Name="win32cred.pyd" Source="E:\Project - AttacklensAgentwork\PROJECT_CORE\agent\os\windows\pkg\dist\attacklens-agent\_internal\win32\win32cred.pyd" KeyPath="yes" />
       </Component>
-      <Component Id="agt_c_win32_win32crypt_pyd" Directory="agt_d_win32" Guid="{38854f6a-4955-f864-3951-b6e932cfc011}">
+      <Component Id="agt_c_win32_win32crypt_pyd" Directory="agt_d_win32" Guid="{79915494-3146-c6d4-6f24-ce125198203c}">
         <File Id="agt_f_win32_win32crypt_pyd" Name="win32crypt.pyd" Source="E:\Project - AttacklensAgentwork\PROJECT_CORE\agent\os\windows\pkg\dist\attacklens-agent\_internal\win32\win32crypt.pyd" KeyPath="yes" />
       </Component>
-      <Component Id="agt_c_win32_win32event_pyd" Directory="agt_d_win32" Guid="{197129bb-5cc6-beae-c9ab-f9d6e124129b}">
+      <Component Id="agt_c_win32_win32event_pyd" Directory="agt_d_win32" Guid="{7e20b21e-f3d1-d535-4d96-c473afbe879c}">
         <File Id="agt_f_win32_win32event_pyd" Name="win32event.pyd" Source="E:\Project - AttacklensAgentwork\PROJECT_CORE\agent\os\windows\pkg\dist\attacklens-agent\_internal\win32\win32event.pyd" KeyPath="yes" />
       </Component>
-      <Component Id="agt_c_win32_win32evtlog_pyd" Directory="agt_d_win32" Guid="{b78e34e0-c6d9-e1a6-04d3-47751fe0fa5a}">
+      <Component Id="agt_c_win32_win32evtlog_pyd" Directory="agt_d_win32" Guid="{cf6a938d-dfb8-cd23-3f9b-88743a995399}">
         <File Id="agt_f_win32_win32evtlog_pyd" Name="win32evtlog.pyd" Source="E:\Project - AttacklensAgentwork\PROJECT_CORE\agent\os\windows\pkg\dist\attacklens-agent\_internal\win32\win32evtlog.pyd" KeyPath="yes" />
       </Component>
-      <Component Id="agt_c_win32_win32service_pyd" Directory="agt_d_win32" Guid="{74bae3f1-fd8a-39b7-376a-40621d0d6297}">
+      <Component Id="agt_c_win32_win32net_pyd" Directory="agt_d_win32" Guid="{56c1d900-174d-81e5-532d-a9e66092e971}">
+        <File Id="agt_f_win32_win32net_pyd" Name="win32net.pyd" Source="E:\Project - AttacklensAgentwork\PROJECT_CORE\agent\os\windows\pkg\dist\attacklens-agent\_internal\win32\win32net.pyd" KeyPath="yes" />
+      </Component>
+      <Component Id="agt_c_win32_win32security_pyd" Directory="agt_d_win32" Guid="{edc71691-8622-6280-c4d1-6cbef6eeaae2}">
+        <File Id="agt_f_win32_win32security_pyd" Name="win32security.pyd" Source="E:\Project - AttacklensAgentwork\PROJECT_CORE\agent\os\windows\pkg\dist\attacklens-agent\_internal\win32\win32security.pyd" KeyPath="yes" />
+      </Component>
+      <Component Id="agt_c_win32_win32service_pyd" Directory="agt_d_win32" Guid="{1dd45248-fcde-a051-f9b9-dad836e01f8a}">
         <File Id="agt_f_win32_win32service_pyd" Name="win32service.pyd" Source="E:\Project - AttacklensAgentwork\PROJECT_CORE\agent\os\windows\pkg\dist\attacklens-agent\_internal\win32\win32service.pyd" KeyPath="yes" />
       </Component>
-      <Component Id="agt_c_yaml__yaml_cp313_win_amd64_pyd" Directory="agt_d_yaml" Guid="{f47ba652-4333-721e-58c4-bceed6c75cb9}">
+      <Component Id="agt_c_win32_win32trace_pyd" Directory="agt_d_win32" Guid="{8a219eb0-8c33-0d9c-d878-6c3d69b6cdc9}">
+        <File Id="agt_f_win32_win32trace_pyd" Name="win32trace.pyd" Source="E:\Project - AttacklensAgentwork\PROJECT_CORE\agent\os\windows\pkg\dist\attacklens-agent\_internal\win32\win32trace.pyd" KeyPath="yes" />
+      </Component>
+      <Component Id="agt_c_yaml__yaml_cp313_win_amd64_pyd" Directory="agt_d_yaml" Guid="{844bf831-290e-3769-9b8a-5aa2b38bac34}">
         <File Id="agt_f_yaml__yaml_cp313_win_amd64_pyd" Name="_yaml.cp313-win_amd64.pyd" Source="E:\Project - AttacklensAgentwork\PROJECT_CORE\agent\os\windows\pkg\dist\attacklens-agent\_internal\yaml\_yaml.cp313-win_amd64.pyd" KeyPath="yes" />
       </Component>
     </ComponentGroup>

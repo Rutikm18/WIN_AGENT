@@ -27,6 +27,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(
 ))))
 
 import agent.os.windows.keystore as ks
+from agent.os.windows.acl import AclResult
 
 SAMPLE_KEY  = "a" * 64   # valid 64-hex key
 AGENT_ID    = "test-agent-win-001"
@@ -83,6 +84,12 @@ class TestCredentialManager:
             result = ks._cm_load(AGENT_ID)
         assert result is None
 
+    def test_load_rejects_malformed_key(self):
+        mock_kr = MagicMock()
+        mock_kr.get_password.return_value = "not-a-valid-api-key"
+        with patch.dict("sys.modules", {"keyring": mock_kr}):
+            assert ks._cm_load(AGENT_ID) is None
+
     def test_store_returns_false_when_keyring_raises(self):
         mock_kr = MagicMock()
         mock_kr.set_password.side_effect = Exception("no keyring")
@@ -124,6 +131,27 @@ class TestDpapiFile:
         mf.assert_called_once()
         md.assert_called_once()
 
+    def test_acl_failure_removes_dpapi_file(self, tmp_security_dir):
+        mock_w32 = _make_dpapi_mock()
+        with patch.dict("sys.modules", {"win32crypt": mock_w32}), \
+             patch("agent.os.windows.keystore._restrict_dir_acl"), \
+             patch("agent.os.windows.keystore._restrict_file_acl",
+                   side_effect=PermissionError("ACL denied")):
+            assert ks._dpapi_store(AGENT_ID, SAMPLE_KEY, tmp_security_dir) is False
+        assert not os.path.exists(ks._dpapi_path(AGENT_ID, tmp_security_dir))
+
+    def test_prewrite_failure_preserves_existing_dpapi_file(self, tmp_security_dir):
+        path = ks._dpapi_path(AGENT_ID, tmp_security_dir)
+        with open(path, "wb") as credential_file:
+            credential_file.write(b"existing-encrypted-key")
+        mock_w32 = _make_dpapi_mock()
+        mock_w32.CryptProtectData.side_effect = OSError("DPAPI unavailable")
+        with patch.dict("sys.modules", {"win32crypt": mock_w32}), \
+             patch("agent.os.windows.keystore._restrict_dir_acl"):
+            assert ks._dpapi_store(AGENT_ID, SAMPLE_KEY, tmp_security_dir) is False
+        with open(path, "rb") as credential_file:
+            assert credential_file.read() == b"existing-encrypted-key"
+
     def test_atomic_write(self, tmp_security_dir):
         """Ensure .tmp file is used and atomically renamed."""
         mock_w32 = _make_dpapi_mock()
@@ -163,6 +191,64 @@ class TestPlainFile:
         result = ks._file_load("nonexistent-agent", tmp_security_dir)
         assert result is None
 
+    def test_rejects_malformed_key(self, tmp_security_dir):
+        path = ks._plain_path(AGENT_ID, tmp_security_dir)
+        with open(path, "w", encoding="ascii") as key_file:
+            key_file.write("not-a-valid-api-key")
+        assert ks._file_load(AGENT_ID, tmp_security_dir) is None
+
+    def test_load_closes_file_handle(self, tmp_security_dir):
+        with patch("agent.os.windows.keystore._restrict_file_acl"), \
+             patch("agent.os.windows.keystore._restrict_dir_acl"):
+            ks._file_store(AGENT_ID, SAMPLE_KEY, tmp_security_dir)
+        real_open = open
+        opened = []
+
+        def tracked_open(*args, **kwargs):
+            handle = real_open(*args, **kwargs)
+            opened.append(handle)
+            return handle
+
+        with patch("builtins.open", side_effect=tracked_open), \
+             patch("agent.os.windows.keystore._restrict_file_acl"):
+            assert ks._file_load(AGENT_ID, tmp_security_dir) == SAMPLE_KEY
+        assert opened and all(handle.closed for handle in opened)
+
+    def test_store_rejects_malformed_key(self, tmp_security_dir):
+        with pytest.raises(ValueError, match="64-character hexadecimal"):
+            ks.store_key(AGENT_ID, "invalid", security_dir=tmp_security_dir)
+
+    def test_acl_failure_removes_plain_file(self, tmp_security_dir):
+        with patch("agent.os.windows.keystore._restrict_dir_acl"), \
+             patch("agent.os.windows.keystore._restrict_file_acl",
+                   side_effect=PermissionError("ACL denied")):
+            with pytest.raises(PermissionError, match="ACL denied"):
+                ks._file_store(AGENT_ID, SAMPLE_KEY, tmp_security_dir)
+        assert not os.path.exists(ks._plain_path(AGENT_ID, tmp_security_dir))
+
+    def test_prewrite_failure_preserves_existing_plain_file(self, tmp_security_dir):
+        path = ks._plain_path(AGENT_ID, tmp_security_dir)
+        with open(path, "w", encoding="ascii") as credential_file:
+            credential_file.write(SAMPLE_KEY)
+        with patch("agent.os.windows.keystore._restrict_dir_acl"), \
+             patch("builtins.open", side_effect=OSError("disk full")):
+            with pytest.raises(OSError, match="disk full"):
+                ks._file_store(AGENT_ID, "b" * 64, tmp_security_dir)
+        with open(path, "r", encoding="ascii") as credential_file:
+            assert credential_file.read() == SAMPLE_KEY
+
+    def test_acl_drift_refuses_plain_file(self, tmp_security_dir):
+        path = ks._plain_path(AGENT_ID, tmp_security_dir)
+        with open(path, "w", encoding="ascii") as key_file:
+            key_file.write(SAMPLE_KEY)
+        with patch("agent.os.windows.keystore.repair_acl", return_value=AclResult(
+            path=path,
+            policy="key_file",
+            compliant=False,
+            error="ACL drift",
+        )):
+            assert ks._file_load(AGENT_ID, tmp_security_dir) is None
+
     def test_path_sanitisation(self, tmp_security_dir):
         """Agent IDs with special chars should not create path traversal."""
         evil_id = "../../../etc/passwd"
@@ -197,7 +283,8 @@ class TestPriorityChain:
              patch("agent.os.windows.keystore._restrict_dir_acl"):
             ks._dpapi_store(AGENT_ID, SAMPLE_KEY, tmp_security_dir)
 
-        with patch.dict("sys.modules", {"keyring": None, "win32crypt": mock_w32}):
+        with patch.dict("sys.modules", {"keyring": None, "win32crypt": mock_w32}), \
+             patch("agent.os.windows.keystore._restrict_file_acl"):
             result = ks.load_key(AGENT_ID, security_dir=tmp_security_dir)
 
         assert result == SAMPLE_KEY
@@ -215,11 +302,13 @@ class TestDeleteKey:
         with patch("agent.os.windows.keystore._restrict_file_acl"), \
              patch("agent.os.windows.keystore._restrict_dir_acl"):
             ks._file_store(AGENT_ID, SAMPLE_KEY, tmp_security_dir)
-        assert ks._file_load(AGENT_ID, tmp_security_dir) is not None
+        with patch("agent.os.windows.keystore._restrict_file_acl"):
+            assert ks._file_load(AGENT_ID, tmp_security_dir) is not None
 
         with patch.dict("sys.modules", {"keyring": None}):
             ks.delete_key(AGENT_ID, security_dir=tmp_security_dir)
-        assert ks._file_load(AGENT_ID, tmp_security_dir) is None
+        with patch("agent.os.windows.keystore._restrict_file_acl"):
+            assert ks._file_load(AGENT_ID, tmp_security_dir) is None
 
     def test_delete_nonexistent_does_not_raise(self, tmp_security_dir):
         with patch.dict("sys.modules", {"keyring": None}):

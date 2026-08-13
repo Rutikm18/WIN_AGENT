@@ -1,6 +1,6 @@
 # Windows Agent Advanced Capabilities
 
-> Advanced startup diagnosis, conservative self-recovery, and isolated scenario testing are documented in [`advanced_support/`](advanced_support/README.md).
+> Current verified scope is recorded in [CURRENT_IMPLEMENTATION.md](CURRENT_IMPLEMENTATION.md). The CIS engine now has 46 checks (not the older 36-check snapshot), and native ETW, push Event Log, and persistence-baseline collection are implemented. Support automation is documented in [`advanced_support/`](advanced_support/README.md).
 
 Verified: 2026-07-27
 
@@ -100,7 +100,7 @@ Legend:
 | Defender, firewall, BitLocker, UAC, Secure Boot and TPM | COMPLETE/PARTIAL | Existing posture collectors; unavailable values report unknown |
 | ASR, WDAC/AppLocker, Credential Guard and LSA protection | PARTIAL | Registry/API coverage exists for selected states; full SKU matrix remains |
 | Patch and pending reboot | COMPLETE | Inventory/posture collectors |
-| Continuous CIS-aligned benchmark assessment | COMPLETE | 36 read-only endpoint controls run hourly; per-check pass/fail/unknown/not-applicable, bounded evidence, score, coverage, change deltas and collector health are delivered through the durable outbox |
+| Continuous CIS-aligned benchmark assessment | COMPLETE | 46 read-only endpoint controls run hourly; per-check pass/fail/unknown/not-applicable, bounded evidence, score, coverage, change deltas and collector health are delivered through the durable outbox |
 | Version/SKU-specific full benchmark mapping | PARTIAL | The bundled Level 1 enterprise profile is CIS-aligned; separate exact policies for every Windows release, server role and licensed Level 2 profile remain future policy packs |
 
 ## Developer and AI security audit

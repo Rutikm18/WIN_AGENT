@@ -77,8 +77,10 @@ def get_or_enroll(cfg: dict) -> ClientKey:
     agent_id = cfg.get("agent", {}).get("id", "").strip() or agent_number
 
     # ── Step 3: enroll with manager ───────────────────────────────────────────
-    manager_url = cfg["manager"]["url"].rstrip("/")
-    tls_verify  = cfg["manager"].get("tls_verify", True)
+    manager_cfg = cfg["manager"]
+    manager_url = manager_cfg["url"].rstrip("/")
+    tls_verify  = manager_cfg.get("ca_bundle") or manager_cfg.get("tls_verify", True)
+    enroll_token = str(cfg.get("enrollment", {}).get("token", "") or "").strip()
 
     log.info(
         "Enrolling: agent_name=%r agent_number=%s manager=%s",
@@ -87,7 +89,7 @@ def get_or_enroll(cfg: dict) -> ClientKey:
 
     response = _post_enroll(
         url        = manager_url + "/api/v1/enroll",
-        token      = "",           # open enrollment — no manual token needed
+        token      = enroll_token,  # empty is allowed only when manager permits open enrollment
         payload    = {
             "agent_id":   agent_id,
             "agent_name": agent_name,
@@ -137,7 +139,7 @@ def _key_path(security_dir: str) -> str:
     if not security_dir:
         import os as _os
         base = _os.environ.get("PROGRAMDATA", r"C:\ProgramData")
-        security_dir = _os.path.join(base, "Jarvis", "security")
+        security_dir = _os.path.join(base, "AttackLens", "security")
     return os.path.join(security_dir, "client.key")
 
 
