@@ -1,6 +1,6 @@
 # Windows Agent Release-Candidate QA Report
 
-> Latest QA addendum: [CURRENT_IMPLEMENTATION.md](CURRENT_IMPLEMENTATION.md). Build 2.0.19 passed 511 agent/platform tests (7 skipped), 24 manager tests, the 384-test canonical package gate (2 skipped), Defender, WiX, compiled MSI contracts, and the nine-case Docker lab. It remains an unsigned development build.
+> Historical QA report. The exact 2.0.24 test, Defender, WiX, compiled-package, GUI handoff, hash, and signing results are maintained in [CURRENT_IMPLEMENTATION.md](CURRENT_IMPLEMENTATION.md); older counts below describe their named builds only.
 
 > The current startup and recovery scenario matrix is maintained in [`advanced_support/FAILURE_MATRIX.md`](advanced_support/FAILURE_MATRIX.md).
 

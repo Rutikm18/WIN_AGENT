@@ -1,6 +1,6 @@
 # Diagnosis, Repair, and Docker Automation
 
-> Verified 2026-08-12 against build 2.0.19; see [../CURRENT_IMPLEMENTATION.md](../CURRENT_IMPLEMENTATION.md). The Docker command now covers nine recovery/self-defense scenarios.
+> Updated 2026-08-13 for build 2.0.21; see [../CURRENT_IMPLEMENTATION.md](../CURRENT_IMPLEMENTATION.md). The Docker command covers nine recovery/self-defense scenarios.
 
 ## Repair a rolled-back installation
 
@@ -15,8 +15,8 @@ and, when binaries are absent, stops before attempting service registration:
 Then install the corrected MSI with a verbose log:
 
 ```powershell
-msiexec /i attacklens-agent-2.0.19-x64.msi /qn ACCEPT_EULA=1 `
-  /l*v "$env:TEMP\attacklens-install-2.0.19.log"
+msiexec /i attacklens-agent-2.0.21-x64.msi /qn ACCEPT_EULA=1 `
+  /l*v "$env:TEMP\attacklens-install-2.0.21.log"
 ```
 
 Configuration-action evidence persists at

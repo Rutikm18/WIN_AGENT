@@ -1,4 +1,8 @@
-# AttackLens Agent — Windows Quick Start
+# AttackLens Agent — Legacy Source-Installer Quick Start
+
+> This folder is retained for compatibility. New 2.0.24 packages are built with
+> `..\build_windows_msi.ps1`; use [../INSTALL.md](../INSTALL.md) for current
+> installation commands. Versioned examples below document the legacy path.
 
 > Service startup diagnosis, safe repair, support bundles, and Docker scenarios are consolidated in [`../advanced_support/`](../advanced_support/README.md).
 

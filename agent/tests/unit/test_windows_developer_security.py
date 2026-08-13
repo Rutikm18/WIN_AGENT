@@ -19,6 +19,7 @@ from agent.os.windows.collectors.developer_security import (
     _MAX_SNAPSHOT,
     _bound_and_redact,
 )
+from agent.os.windows.collectors.security_audit import WindowsSecurityAuditCollector
 
 
 class _EmptyAudit:
@@ -43,6 +44,10 @@ class _EmptyAudit:
     @staticmethod
     def _mcp_inventory(_profiles):
         return {"servers": [], "config_files": []}
+
+    @staticmethod
+    def _find_mcp_maps(node):
+        return WindowsSecurityAuditCollector._find_mcp_maps(node)
 
     @staticmethod
     def _browser_extensions(_profiles):
@@ -164,6 +169,21 @@ class DeveloperSecurityContractTests(unittest.TestCase):
         self.assertTrue(result["collection"]["partial"])
         self.assertNotIn('"secret"', json.dumps(result))
 
+    def test_each_capability_builder_runs_exactly_once(self):
+        collector = self._collector()
+        calls = []
+        for capability, item_key in DEVSEC_CAP_ITEM_KEYS.items():
+            setattr(
+                collector,
+                f"_collect_{capability}",
+                lambda name=capability, key=item_key: (
+                    calls.append(name) or {key: []}
+                ),
+            )
+        result = collector.collect()
+        self.assertFalse(result["collection"]["partial"])
+        self.assertEqual(calls, list(REQUIRED_CAPABILITIES))
+
     def test_blocked_capability_hits_deadline_without_losing_snapshot(self):
         collector = self._collector()
         blocker = threading.Event()
@@ -251,6 +271,86 @@ class DeveloperSecurityContractTests(unittest.TestCase):
                 "containers": [], "images": [],
             },
         )
+
+    def test_cron_prefers_native_task_scheduler_metadata(self):
+        collector = self._collector(empty_capabilities=False)
+        task = {
+            "name": r"\AttackLens Test", "type": "schtasks",
+            "schedule": "boot", "command": "agent.exe", "user": "SYSTEM",
+            "enabled": True, "last_run": None, "next_run": None,
+        }
+        with mock.patch(
+            "agent.os.windows.collectors.developer_security._native_scheduled_tasks",
+            return_value=[task],
+        ) as native:
+            result = collector._collect_cron()
+        native.assert_called_once_with()
+        self.assertEqual(result["users"], [{"user": "SYSTEM", "items": [task]}])
+
+    def test_mcp_finds_bounded_workspace_child_and_never_returns_env_values(self):
+        with tempfile.TemporaryDirectory() as root:
+            profile = Path(root) / "alice"
+            config = profile / "projects" / "demo" / ".mcp.json"
+            config.parent.mkdir(parents=True)
+            config.write_text(
+                json.dumps({
+                    "mcpServers": {
+                        "local": {
+                            "command": "node",
+                            "args": ["server.js", "--token", "TOP-SECRET"],
+                            "env": {"API_TOKEN": "NEVER-RETURN"},
+                        }
+                    }
+                }),
+                encoding="utf-8",
+            )
+            collector = self._collector([profile], empty_capabilities=False)
+            collector._profiles_cache = [profile]
+            result = collector._collect_mcp_servers()
+        self.assertEqual(result["servers"][0]["name"], "local")
+        self.assertEqual(result["servers"][0]["env_names"], ["API_TOKEN"])
+        encoded = json.dumps(result)
+        self.assertNotIn("NEVER-RETURN", encoded)
+        self.assertNotIn("TOP-SECRET", encoded)
+
+    def test_node_packages_include_pnpm_global_store(self):
+        with tempfile.TemporaryDirectory() as root:
+            profile = Path(root) / "alice"
+            package = (
+                profile / "AppData" / "Local" / "pnpm" / "global" /
+                "5" / "node_modules" / "@modelcontextprotocol" / "sdk"
+            )
+            package.mkdir(parents=True)
+            (package / "package.json").write_text(
+                '{"name":"@modelcontextprotocol/sdk","version":"1.2.3"}',
+                encoding="utf-8",
+            )
+            collector = self._collector([profile], empty_capabilities=False)
+            collector._profiles_cache = [profile]
+            result = collector._collect_node_packages()
+        packages = result["users"][0]["packages"]
+        self.assertEqual(packages[0]["manager"], "pnpm")
+        self.assertEqual(packages[0]["name"], "@modelcontextprotocol/sdk")
+        self.assertEqual(packages[0]["version"], "1.2.3")
+
+    def test_python_packages_include_machine_wide_installations(self):
+        with tempfile.TemporaryDirectory() as root:
+            program_files = Path(root) / "Program Files"
+            distribution = (
+                program_files / "Python313" / "Lib" / "site-packages" /
+                "openai-2.1.0.dist-info"
+            )
+            distribution.mkdir(parents=True)
+            collector = self._collector(empty_capabilities=False)
+            collector._profiles_cache = []
+            with mock.patch.dict(
+                os.environ,
+                {"ProgramFiles": str(program_files), "ProgramFiles(x86)": ""},
+            ):
+                result = collector._collect_python_packages()
+        self.assertEqual(result["users"][0]["user"], "system")
+        self.assertEqual(result["users"][0]["packages"][0]["name"], "openai")
+        self.assertEqual(result["users"][0]["packages"][0]["version"], "2.1.0")
 
     def test_manager_summary_counts_nonzero_exact_record_arrays(self):
         collector = self._collector()

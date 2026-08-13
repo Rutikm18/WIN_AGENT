@@ -7,6 +7,8 @@ from agent.os.windows.boot_persistence import (
     BootStateTracker,
     RESTART_ACTIONS,
     RESET_PERIOD_SEC,
+    WATCHDOG_RESTART_ACTIONS,
+    WATCHDOG_SERVICE_NAME,
     enforce_service_policy,
 )
 
@@ -112,6 +114,17 @@ def test_audit_only_reports_drift_without_mutation() -> None:
     assert fake.changes == []
 
 
+def test_watchdog_policy_uses_its_own_restart_contract() -> None:
+    fake = FakeWin32Service(drifted=True)
+    report = enforce_service_policy(
+        service_name=WATCHDOG_SERVICE_NAME,
+        win32service_module=fake,
+    )
+    assert report["compliant"] is True
+    assert fake.failure["Actions"] == WATCHDOG_RESTART_ACTIONS
+    assert fake.failure_flag is True
+
+
 def test_boot_state_detects_reboot_and_clean_shutdown(tmp_path: Path) -> None:
     path = tmp_path / "boot_state.json"
     first = BootStateTracker(
@@ -149,3 +162,31 @@ def test_boot_state_flags_unclean_same_boot_restart(tmp_path: Path) -> None:
     transition = second.begin_start()
     assert transition["boot_changed"] is False
     assert transition["unexpected_previous_stop"] is True
+
+
+def test_power_resume_wakes_delivery_and_queues_lifecycle_event(tmp_path: Path) -> None:
+    from agent.os.windows.win_agent import WindowsAgent
+
+    cfg = {
+        "agent": {"id": "win-test", "name": "endpoint"},
+        "manager": {"url": "http://manager.test:8080"},
+        "paths": {
+            "security_dir": str(tmp_path / "security"),
+            "spool_dir": str(tmp_path / "spool"),
+            "log_dir": str(tmp_path / "logs"),
+            "data_dir": str(tmp_path / "data"),
+            "status_dir": str(tmp_path / "status"),
+        },
+        "collection": {"sections": {}},
+    }
+    agent = WindowsAgent(cfg)
+    queued = []
+    agent._outbox = object()
+    agent._queue_collected_data = lambda section, data: queued.append((section, data)) or True
+
+    agent.handle_power_event(7)
+
+    assert agent._send_wake.is_set()
+    assert agent._connection_state == "resuming"
+    assert queued[0][0] == "agent_lifecycle"
+    assert queued[0][1]["event"] == "power_resume"

@@ -1,6 +1,15 @@
 Windows Security Audit
 
-Current verified Windows implementation is in [CURRENT_IMPLEMENTATION.md](CURRENT_IMPLEMENTATION.md). This document is retained as additional design context. Startup diagnostics and safe automated recovery are documented in [`advanced_support/`](advanced_support/README.md).
+Audited 2026-08-14 for build 2.0.24. All 17 capability groups below are wired
+to the hourly `developer_security` snapshot; the exact Windows data sources,
+privacy limits, manager contract, and verification commands are documented in
+[DEVELOPER_SECURITY.md](DEVELOPER_SECURITY.md). Current release evidence is in
+[CURRENT_IMPLEMENTATION.md](CURRENT_IMPLEMENTATION.md). Startup diagnostics and
+safe automated recovery are documented in [`advanced_support/`](advanced_support/README.md).
+
+The commands below are independent operator cross-checks. The service collector
+uses bounded native/filesystem APIs and does not execute arbitrary developer
+tools merely to inventory them.
 
 Run the following commands in PowerShell, preferably as Administrator where required.
 

@@ -18,7 +18,7 @@
     include an RFC 3161 timestamp.
 
 .PARAMETER Version
-    Three-part MSI product version, for example 2.0.1.
+    Three-part MSI product version. Default: 2.0.25.
 
 .PARAMETER SignThumbprint
     SHA-1 thumbprint of an Authenticode code-signing certificate in the
@@ -46,7 +46,7 @@
     .\build_windows_msi.ps1
 
 .EXAMPLE
-    .\build_windows_msi.ps1 -Version 2.1.0
+    .\build_windows_msi.ps1 -Version 2.0.25
 
 .EXAMPLE
     .\build_windows_msi.ps1 -Version 2.1.0 -Release `
@@ -55,7 +55,7 @@
 [CmdletBinding()]
 param(
     [ValidatePattern('^\d{1,5}\.\d{1,5}\.\d{1,5}$')]
-    [string] $Version = "2.0.13",
+    [string] $Version = "2.0.25",
 
     [string] $SignThumbprint = "",
 

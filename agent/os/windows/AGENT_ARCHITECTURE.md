@@ -1,6 +1,6 @@
 # AttackLens Windows Agent Architecture
 
-> Current implementation: [CURRENT_IMPLEMENTATION.md](CURRENT_IMPLEMENTATION.md). As of 2026-08-12 the runtime has 26 scheduled sections, native ETW process/DNS streams, push Event Log bookmarks, transactional persistence baselines, 46 CIS checks, and periodic self-defense auditing.
+> Current implementation: [CURRENT_IMPLEMENTATION.md](CURRENT_IMPLEMENTATION.md). As of 2026-08-13 the runtime has 27 scheduled sections, including the 17-part Windows DeepMesh/developer-security snapshot, native ETW process/DNS streams, push Event Log bookmarks, transactional persistence baselines, 46 CIS checks, and periodic self-defense auditing.
 
 > Startup recovery, root-cause evidence, failure cases, and one-command tooling are consolidated in [`advanced_support/`](advanced_support/README.md) (2026-08-09).
 

@@ -1,20 +1,23 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  product.wxs — AttackLens Agent WiX v4 MSI product definition.
+  product.wxs — legacy source-installer WiX v4 definition.
+
+  The canonical 2.0.25 release path is ..\build_windows_msi.ps1 and
+  ..\pkg\attacklens.wxs. This file remains for compatibility testing.
 
   Build via build_msi.ps1 (which harvests the Python source tree first):
-    .\build_msi.ps1 -Version "2.0.1"
+    .\build_msi.ps1 -Version "2.0.25"
 
   Silent install:
-    msiexec /i attacklens-agent-2.0.1-x64.msi /qn /l*v install.log ^
+    msiexec /i attacklens-agent-2.0.25-x64.msi /qn /l*v install.log ^
         MANAGER_URL="http://34.224.174.38:8080" ^
         AGENT_NAME="WORKSTATION-01"
 
   Silent uninstall:
-    msiexec /x attacklens-agent-2.0.1-x64.msi /qn
+    msiexec /x attacklens-agent-2.0.25-x64.msi /qn
 
   Variables (passed via wix build -d VarName=Value):
-    Version       — semantic version string  (e.g. 2.0.1)
+    Version       — semantic version string  (e.g. 2.0.25)
     BuildBinDir   — path to build\bin\  (run_agent.py, run_watchdog.py)
     ScriptsDir    — path to installer\  (scripts deployed to scripts\)
 -->

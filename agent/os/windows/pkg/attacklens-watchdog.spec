@@ -10,6 +10,7 @@ a = Analysis(
     datas=[],
     hiddenimports=[
         'agent.os.windows.config_model',
+        'agent.os.windows.boot_persistence',
         'agent.os.windows.service',
         'agent.os.windows.startup_recovery',
         'win32service', 'win32serviceutil', 'win32event',

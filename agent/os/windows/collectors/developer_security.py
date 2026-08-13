@@ -78,7 +78,8 @@ _ASSIGNED_SECRET = re.compile(
 )
 _AGENT_COMMANDS = (
     "claude", "codex", "gemini", "aider", "ollama", "continue",
-    "cline", "goose", "opencode", "fabric", "sgpt",
+    "cline", "goose", "opencode", "fabric", "sgpt", "cursor", "code",
+    "uv", "uvx", "npx", "pnpm", "bun", "docker",
 )
 
 
@@ -327,16 +328,30 @@ class WinDeveloperSecurityCollector(WinBaseCollector):
             known = (
                 roaming / "Claude" / "claude_desktop_config.json",
                 roaming / "Cursor" / "User" / "settings.json",
+                roaming / "Cursor" / "User" / "mcp.json",
                 roaming / "Code" / "User" / "settings.json",
+                roaming / "Code" / "User" / "mcp.json",
                 roaming / "Windsurf" / "User" / "settings.json",
+                roaming / "Windsurf" / "User" / "mcp.json",
                 profile / ".cursor" / "mcp.json",
                 profile / ".vscode" / "mcp.json",
                 profile / ".windsurf" / "mcp.json",
                 profile / ".continue" / "config.json",
+                profile / ".continue" / "config.yaml",
+                profile / ".continue" / "config.yml",
+                profile / ".codeium" / "windsurf" / "mcp_config.json",
                 profile / ".claude.json",
                 profile / ".claude" / "settings.json",
                 profile / ".codex" / "config.toml",
+                profile / ".config" / "mcp.json",
+                profile / ".config" / "continue" / "config.yaml",
             )
+            for editor in ("Code", "Cursor", "Windsurf"):
+                storage = roaming / editor / "User" / "globalStorage"
+                known += (
+                    storage / "saoudrizwan.claude-dev" / "settings" / "cline_mcp_settings.json",
+                    storage / "rooveterinaryinc.roo-cline" / "settings" / "mcp_settings.json",
+                )
             for path in known:
                 if self._audit._path_is_file(path):
                     candidates.setdefault(os.path.normcase(str(path)), path)
@@ -345,16 +360,27 @@ class WinDeveloperSecurityCollector(WinBaseCollector):
                 profile / "projects", profile / "workspace", profile / "workspaces",
                 profile / "Documents", profile / "Desktop",
             ):
-                # Only the conventional per-repository locations are probed;
-                # an unbounded recursive workspace search can hang on vendor
-                # trees or redirected folders while running as SYSTEM.
-                for relative in (
-                    ".mcp.json", ".cursor/mcp.json", ".vscode/mcp.json",
-                    ".windsurf/mcp.json", ".claude/settings.json", ".codex/config.toml",
-                ):
-                    path = root / Path(relative)
-                    if self._audit._path_is_file(path):
-                        candidates.setdefault(os.path.normcase(str(path)), path)
+                # Probe the conventional root and at most 128 immediate
+                # repository children.  This finds projects/demo/.mcp.json
+                # without an unbounded recursive walk through vendor trees or
+                # redirected folders while the service runs as SYSTEM.
+                repositories = [root]
+                try:
+                    repositories.extend(
+                        child for child in list(root.iterdir())[:128]
+                        if child.is_dir()
+                    )
+                except OSError:
+                    pass
+                for repository in repositories:
+                    for relative in (
+                        ".mcp.json", ".cursor/mcp.json", ".vscode/mcp.json",
+                        ".windsurf/mcp.json", ".claude/settings.json",
+                        ".codex/config.toml",
+                    ):
+                        path = repository / Path(relative)
+                        if self._audit._path_is_file(path):
+                            candidates.setdefault(os.path.normcase(str(path)), path)
         for path in list(candidates.values())[:_MAX_ITEMS]:
             text = _bounded_text(path)
             if not text:
@@ -369,6 +395,16 @@ class WinDeveloperSecurityCollector(WinBaseCollector):
                     import tomllib
 
                     parsed = tomllib.loads(text)
+                elif path.suffix.casefold() in {".yaml", ".yml"}:
+                    try:
+                        import yaml
+
+                        try:
+                            parsed = yaml.safe_load(text) or {}
+                        except yaml.YAMLError:
+                            parsed = {}
+                    except ImportError:
+                        parsed = {}
                 else:
                     parsed = {}
                 maps = self._audit._find_mcp_maps(parsed)
@@ -567,8 +603,11 @@ class WinDeveloperSecurityCollector(WinBaseCollector):
                 profile / "AppData" / "Roaming" / "npm",
                 profile / ".local" / "bin",
                 profile / ".cargo" / "bin",
+                profile / ".bun" / "bin",
                 profile / "scoop" / "shims",
                 profile / "AppData" / "Local" / "Programs" / "Ollama",
+                profile / "AppData" / "Local" / "Programs" / "Microsoft VS Code" / "bin",
+                profile / "AppData" / "Local" / "Programs" / "Cursor" / "resources" / "app" / "bin",
             ))
         return values[:1000]
 
@@ -745,6 +784,16 @@ class WinDeveloperSecurityCollector(WinBaseCollector):
         return {"users": users[:_MAX_ITEMS]}
 
     def _scheduled_task_files(self) -> list[dict[str, Any]]:
+        # Prefer Task Scheduler's native metadata.  Opening and parsing every
+        # task XML file can consume the entire six-second capability budget
+        # under LocalSystem, which can read many more protected task files
+        # than an interactive user.  Keep the XML path as a source/test-host
+        # fallback when COM is unavailable.
+        try:
+            return list(_native_scheduled_tasks())[:_MAX_ITEMS]
+        except Exception:
+            pass
+
         root = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / "Tasks"
         if not self._safe_is_dir(root):
             # Source-only test hosts may not expose the Windows Tasks folder.
@@ -866,11 +915,24 @@ class WinDeveloperSecurityCollector(WinBaseCollector):
             roots.extend((
                 (profile.name, "npm", profile / "AppData" / "Roaming" / "npm" / "node_modules"),
                 (profile.name, "yarn", profile / "AppData" / "Local" / "Yarn" / "Data" / "global" / "node_modules"),
+                (profile.name, "bun", profile / ".bun" / "install" / "global" / "node_modules"),
             ))
-        for environment in ("ProgramFiles", "ProgramFiles(x86)"):
+            pnpm_global = profile / "AppData" / "Local" / "pnpm" / "global"
+            try:
+                roots.extend(
+                    (profile.name, "pnpm", version / "node_modules")
+                    for version in list(pnpm_global.iterdir())[:32]
+                    if version.is_dir()
+                )
+            except OSError:
+                pass
+        for environment in ("ProgramFiles", "ProgramFiles(x86)", "ProgramData"):
             base = os.environ.get(environment)
             if base:
-                roots.append(("system", "npm", Path(base) / "nodejs" / "node_modules"))
+                roots.extend((
+                    ("system", "npm", Path(base) / "nodejs" / "node_modules"),
+                    ("system", "npm", Path(base) / "npm" / "node_modules"),
+                ))
         by_user: dict[str, list[dict[str, Any]]] = {}
         for user, manager, root in roots:
             for package in self._node_package_dirs(root, _MAX_ITEMS - sum(map(len, by_user.values()))):
@@ -937,6 +999,18 @@ class WinDeveloperSecurityCollector(WinBaseCollector):
                     for site in (version / "Lib" / "site-packages", version / "site-packages"):
                         if self._safe_is_dir(site):
                             roots.append((profile.name, version, site))
+        for environment in ("ProgramFiles", "ProgramFiles(x86)"):
+            base_raw = os.environ.get(environment)
+            if not base_raw:
+                continue
+            try:
+                versions = list(Path(base_raw).glob("Python*"))[:32]
+            except OSError:
+                continue
+            for version in versions:
+                site = version / "Lib" / "site-packages"
+                if self._safe_is_dir(site):
+                    roots.append(("system", version, site))
         by_user: dict[str, dict[str, Any]] = {}
         remaining = _MAX_ITEMS
         for user, version, site in roots:

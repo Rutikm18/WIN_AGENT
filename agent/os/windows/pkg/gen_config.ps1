@@ -59,7 +59,7 @@ try {
     } elseif ($raw) {
         # Split only when the next token is a known property. This preserves
         # semicolons and additional '=' characters inside enrollment tokens.
-        $known = 'MANAGER_URL|MANAGER_IP|MANAGER_PORT|TLS_VERIFY|ALLOW_INSECURE_TRANSPORT|CA_BUNDLE|SPKI_PIN|ENROLL_TOKEN|AGENT_NAME|COLLECTION_PROFILE|PRESERVE_STATE|PURGE_ON_UNINSTALL|U|I|P|V|H|C|S|T|N|R|K|X'
+        $known = 'MANAGER_URL|MANAGER_IP|MANAGER_PORT|TLS_VERIFY|ALLOW_INSECURE_TRANSPORT|CA_BUNDLE|SPKI_PIN|ENROLL_TOKEN|AGENT_NAME|COLLECTION_PROFILE|PRESERVE_STATE|PURGE_ON_UNINSTALL|GUI_MANAGER_REQUIRED|U|I|P|V|H|C|S|T|N|R|K|X|G'
         foreach ($pair in ($raw -split ";(?=(?:$known)=)")) {
             if ($pair -match '^([^=]+)=(.*)$') {
                 $ca[$Matches[1].Trim()] = $Matches[2].Trim()
@@ -80,6 +80,7 @@ try {
         R = 'COLLECTION_PROFILE'
         K = 'PRESERVE_STATE'
         X = 'PURGE_ON_UNINSTALL'
+        G = 'GUI_MANAGER_REQUIRED'
     }
     foreach ($alias in $aliases.Keys) {
         $name = $aliases[$alias]
@@ -99,11 +100,19 @@ try {
     foreach ($key in @('MANAGER_URL','MANAGER_IP','MANAGER_PORT','TLS_VERIFY',
                        'ALLOW_INSECURE_TRANSPORT',
                        'CA_BUNDLE','SPKI_PIN','ENROLL_TOKEN','AGENT_NAME',
-                       'COLLECTION_PROFILE','PRESERVE_STATE','PURGE_ON_UNINSTALL')) {
+                       'COLLECTION_PROFILE','PRESERVE_STATE','PURGE_ON_UNINSTALL',
+                       'GUI_MANAGER_REQUIRED')) {
         if ($ca.ContainsKey($key)) { $ca[$key] = Read-MsiValue $ca[$key] }
     }
     $managerOverrideRequested = [bool]($ca['MANAGER_URL'] -or $ca['MANAGER_IP'])
     $agentNameRequested = [bool]$ca['AGENT_NAME']
+    $guiManagerRequired = $ca['GUI_MANAGER_REQUIRED'] -match '^(?i:true|1)$'
+
+    if ($guiManagerRequired -and -not $managerOverrideRequested) {
+        throw ('The manager address entered in the installer GUI was not ' +
+            'transferred to the elevated configuration action. Installation ' +
+            'was stopped to prevent an empty [manager] url.')
+    }
 
     # ── Resolve parameters with sensible defaults ─────────────────────────────
     $managerIp   = if ($ca['MANAGER_IP'])   { $ca['MANAGER_IP']   } else { ''    }
@@ -249,8 +258,9 @@ try {
         'none'
     }
     Write-InstallerDiagnostic (
-        'Captured installer configuration: manager_source={0}; manager_configured={1}; transport={2}; port={3}.' -f
-        $managerInputSource, [bool]$managerUrl, $managerTransport, $managerPort
+        'Captured installer configuration: manager_source={0}; manager_configured={1}; transport={2}; port={3}; gui_manager_required={4}.' -f
+        $managerInputSource, [bool]$managerUrl, $managerTransport, $managerPort,
+        $guiManagerRequired
     )
 
     $base = 'C:\ProgramData\AttackLens'

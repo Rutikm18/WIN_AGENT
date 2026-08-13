@@ -16,6 +16,9 @@
                  Text="Manager address:" />
         <Control Id="ManagerUrl" Type="Edit" X="125" Y="72" Width="220" Height="18"
                  Property="MANAGER_URL" />
+        <Control Id="ManagerValidationError" Type="Text" X="125" Y="53" Width="220" Height="16"
+                 Text="Enter a valid IPv4 address (for example, 72.61.228.62), DNS name, or HTTP(S) URL."
+                 HideCondition="NOT MANAGER_URL OR MANAGER_ADDRESS_VALID" />
         <Control Id="ManagerPortLabel" Type="Text" X="20" Y="101" Width="100" Height="15"
                  Text="Port:" />
         <Control Id="ManagerPort" Type="Edit" X="125" Y="98" Width="55" Height="18"
@@ -45,9 +48,11 @@
           <Publish Event="NewDialog" Value="InstallDirDlg" Condition="1" />
         </Control>
         <Control Id="Next" Type="PushButton" X="236" Y="235" Width="56" Height="17"
-                 Default="yes" Text="Next" DisableCondition="NOT MANAGER_URL">
+                 Default="yes" Text="Next">
+          <Publish Event="DoAction" Value="CA_ValidateManagerAddressUI"
+                   Order="1" Condition="1" />
           <Publish Event="NewDialog" Value="AttackLensEnrollmentDlg"
-                   Condition="MANAGER_URL" />
+                   Order="2" Condition="MANAGER_ADDRESS_VALID = &quot;1&quot;" />
         </Control>
         <Control Id="Cancel" Type="PushButton" X="304" Y="235" Width="56" Height="17"
                  Cancel="yes" Text="Cancel">
@@ -140,7 +145,13 @@
         </Control>
         <Control Id="Next" Type="PushButton" X="236" Y="235" Width="56" Height="17"
                  Default="yes" Text="Next">
-          <Publish Event="NewDialog" Value="VerifyReadyDlg" Condition="1" />
+          <!-- Capture while the custom dialogs still own their edit-control
+               properties. A later InstallUISequence action can observe an
+               empty MANAGER_URL after the dialog stack transitions. -->
+          <Publish Event="DoAction" Value="CA_StageWriteConfigUI"
+                   Order="1" Condition="1" />
+          <Publish Event="NewDialog" Value="VerifyReadyDlg"
+                   Order="2" Condition="1" />
         </Control>
         <Control Id="Cancel" Type="PushButton" X="304" Y="235" Width="56" Height="17"
                  Cancel="yes" Text="Cancel">

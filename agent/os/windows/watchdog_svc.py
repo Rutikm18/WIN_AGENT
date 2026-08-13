@@ -1,14 +1,14 @@
 """
-agent/os/windows/watchdog_svc.py — Windows Watchdog Service for mac_intel agent.
+agent/os/windows/watchdog_svc.py — Windows Watchdog Service for AttackLens Agent.
 
 Architecture
 ────────────
   SCM
-   └─ MacIntelWatchdog service  (this file)
-       └─ MacIntelAgent service  ← monitors via SCM + optional process health-check
+   └─ AttackLensWatchdog service  (this file)
+       └─ AttackLensAgent service  ← monitors via SCM + runtime heartbeat
 
 The watchdog is a separate Windows Service that:
-  1. Ensures MacIntelAgent is running (restarts it if stopped/crashed)
+  1. Ensures AttackLensAgent is running (restarts it if stopped/crashed)
   2. Rate-limits restarts: max MAX_RESTARTS in RESTART_WINDOW_SEC seconds
   3. On rate-limit hit: opens a non-blocking BACKOFF_SEC circuit and logs a
      Windows Event so operators are alerted.
@@ -23,11 +23,11 @@ Why a separate service instead of SC failure actions?
 
 CLI
 ───
-  macintel-watchdog.exe install   — register watchdog service
-  macintel-watchdog.exe start     — start watchdog
-  macintel-watchdog.exe stop      — stop watchdog
-  macintel-watchdog.exe remove    — unregister watchdog
-  macintel-watchdog.exe debug     — run in foreground
+  attacklens-watchdog.exe install   — register watchdog service
+  attacklens-watchdog.exe start     — start watchdog
+  attacklens-watchdog.exe stop      — stop watchdog
+  attacklens-watchdog.exe remove    — unregister watchdog
+  attacklens-watchdog.exe debug     — run in foreground
 
 Dependencies
 ────────────
@@ -168,9 +168,14 @@ class WatchdogCore:
         log.info("Watchdog started — monitoring %s every %ds",
                  AGENT_SERVICE_NAME, CHECK_INTERVAL_SEC)
         consecutive_failures = 0
+        next_policy_check = 0.0
 
         while not self._should_stop():
             try:
+                now = time.monotonic()
+                if now >= next_policy_check:
+                    self._repair_own_service_policy()
+                    next_policy_check = now + 300.0
                 state, reason = self._query_agent_state()
                 self._publish_state(state, reason)
                 if state == "stopped":
@@ -221,6 +226,40 @@ class WatchdogCore:
             self._sleep(CHECK_INTERVAL_SEC)
 
         log.info("Watchdog stopped")
+
+    def _repair_own_service_policy(self) -> None:
+        """Keep the watchdog itself boot-persistent and crash-recoverable."""
+        try:
+            _add_root_to_path()
+            from agent.os.windows.boot_persistence import (
+                WATCHDOG_RESTART_ACTIONS,
+                WATCHDOG_SERVICE_NAME,
+                enforce_service_policy,
+            )
+
+            report = enforce_service_policy(
+                service_name=WATCHDOG_SERVICE_NAME,
+                restart_actions=WATCHDOG_RESTART_ACTIONS,
+                failure_actions_on_non_crash=True,
+                repair=True,
+            )
+            repaired = list(report.get("repaired") or [])
+            if repaired:
+                log.warning(
+                    "Repaired watchdog SCM persistence drift: %s",
+                    ", ".join(repaired),
+                )
+                self._record_problem(
+                    "watchdog_persistence_repaired",
+                    ",".join(repaired),
+                )
+            elif report.get("error"):
+                log.warning(
+                    "Watchdog SCM persistence audit unavailable: %s",
+                    report["error"],
+                )
+        except Exception as exc:
+            log.warning("Watchdog SCM persistence self-repair failed: %s", exc)
 
     def _query_agent_state(self) -> tuple[str, str]:
         if not _HAS_WIN32:
@@ -437,7 +476,7 @@ if _HAS_WIN32:
             "Monitors the AttackLens Agent service and restarts it if it stops. "
             "Rate-limited to prevent restart storms."
         )
-        # No dependency on MacIntelAgent — the watchdog must start even when
+        # No dependency on AttackLensAgent — the watchdog must start even when
         # the agent is down (that is precisely when it does its job).
         _svc_deps_: list[str] = []
 
@@ -452,6 +491,9 @@ if _HAS_WIN32:
             self.ReportServiceStatus(win32service.SERVICE_STOP_PENDING)
             win32event.SetEvent(self._stop_event_win32)
             self._py_stop.set()
+
+        def SvcShutdown(self):
+            self.SvcStop()
 
         def SvcDoRun(self):
             _setup_bootstrap_logging()

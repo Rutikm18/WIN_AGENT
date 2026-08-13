@@ -164,7 +164,7 @@ Get-Content "$base\logs\agent.log" -Tail 200 |
     Select-String "outbox|dead letter|eventlog|authentication|tls|disk_pressure"
 
 Invoke-WebRequest -UseBasicParsing `
-    -Uri "http://13.233.122.80:8080/health" -TimeoutSec 30
+    -Uri "http://72.61.228.62:8080/health" -TimeoutSec 30
 ```
 
 Do not delete the SQLite database to fix connectivity. Restore the manager,

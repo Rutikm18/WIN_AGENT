@@ -1,9 +1,14 @@
 # AttackLens Windows Agent — Installation Guide
 
-> Current package: `pkg\dist\attacklens-agent-2.0.19-x64.msi`; authoritative status and SHA-256 are in [CURRENT_IMPLEMENTATION.md](CURRENT_IMPLEMENTATION.md). Historical 2.0.10–2.0.13 sections explain earlier fixes and are not the recommended artifact. Startup tooling is in [`advanced_support/`](advanced_support/README.md).
+> Current package: `pkg\dist\attacklens-agent-2.0.25-x64.msi`; authoritative status and SHA-256 are in [CURRENT_IMPLEMENTATION.md](CURRENT_IMPLEMENTATION.md). This long-form guide preserves historical 2.0.10–2.0.13 examples; substitute 2.0.25 for current deployment. Startup tooling is in [`advanced_support/`](advanced_support/README.md).
 
 **Applies to:** v2.0+  
-**Last updated:** 2026-05-25
+**Last updated:** 2026-08-13
+
+For the current MSI-only client deployment procedure, see
+[CLIENT_INSTALLATION_TERMINAL.md](CLIENT_INSTALLATION_TERMINAL.md).
+Supported deployment scenarios are summarized in
+[WINDOWS_AGENT_USE_CASES.md](WINDOWS_AGENT_USE_CASES.md).
 
 ---
 
@@ -16,7 +21,7 @@
 | Configuration file | `C:\ProgramData\AttackLens\config\agent.toml` |
 | Log files | `C:\ProgramData\AttackLens\logs\agent.log` |
 | API key (after enrollment) | `C:\ProgramData\AttackLens\security\client.key` |
-| Offline spool buffer | `C:\ProgramData\AttackLens\spool\win_agent.spool.ndjson` |
+| Durable encrypted outbox | `C:\ProgramData\AttackLens\spool\delivery.db` |
 
 Two Windows Services are created:
 

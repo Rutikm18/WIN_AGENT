@@ -1,6 +1,6 @@
 # Windows Release Trust and Distribution
 
-> Build 2.0.19 passed the unsigned development gate; see [CURRENT_IMPLEMENTATION.md](CURRENT_IMPLEMENTATION.md). Production distribution still requires the fail-closed `-Release -SignThumbprint` workflow described here.
+> Build 2.0.24 is the current unsigned development artifact; see [CURRENT_IMPLEMENTATION.md](CURRENT_IMPLEMENTATION.md). Production distribution still requires the fail-closed `-Release -SignThumbprint` workflow described here.
 
 > Release validation must include the startup scenarios and repair safety boundaries in [`advanced_support/`](advanced_support/README.md).
 

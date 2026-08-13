@@ -290,12 +290,24 @@ class MsiHardeningTests(unittest.TestCase):
         self.assertIn('BinaryRef="PrepareConfigDataScript"', wix)
         self.assertIn('JScriptCall="PrepareConfigData"', wix)
         self.assertIn('Before="CA_WriteConfig"', wix)
-        self.assertIn('-EncodedCustomActionData &quot;[CustomActionData]&quot;', wix)
+        self.assertIn('-EncodedCustomActionData &quot;[CA_WriteConfig]&quot;', wix)
+        self.assertNotIn(
+            '-EncodedCustomActionData &quot;[CustomActionData]&quot;', wix
+        )
         self.assertIn('HideTarget="yes"', wix)
         self.assertIn("Session.Property('CA_WriteConfig')", bridge)
         self.assertIn("function PrepareConfigData()", bridge)
         self.assertIn("return 1;", bridge)
         self.assertIn("['U', 'MANAGER_URL']", bridge)
+        self.assertIn("['G', 'GUI_MANAGER_REQUIRED']", bridge)
+        self.assertIn("Session.Property('GUI_MANAGER_REQUIRED') = '1'", bridge)
+        self.assertIn("Session.Property('CA_WriteConfig') = buildConfigData();", bridge)
+        self.assertIn("function ValidateManagerAddressUI()", bridge)
+        self.assertIn('JScriptCall="ValidateManagerAddressUI"', wix)
+        self.assertNotIn(
+            "var encoded = Session.Property('ATTACKLENS_CONFIG_DATA');", bridge
+        )
+        self.assertNotIn('<InstallUISequence>', wix)
         self.assertIn(
             "[Convert]::FromBase64String($EncodedCustomActionData)", generator
         )
@@ -310,6 +322,17 @@ class MsiHardeningTests(unittest.TestCase):
         self.assertIn("sidtype AttackLensWatchdog unrestricted", source)
         self.assertIn('After="InstallServices"', source)
         self.assertIn('After="CA_SetAgentServiceSid"', source)
+
+    def test_both_services_are_boot_persistent_and_recover_noncrash_failures(self) -> None:
+        windows_dir = Path(__file__).resolve().parents[1]
+        wix = (windows_dir / "pkg" / "attacklens.wxs").read_text(encoding="utf-8")
+        watchdog = (windows_dir / "watchdog_svc.py").read_text(encoding="utf-8")
+        for service in ("AttackLensAgent", "AttackLensWatchdog"):
+            self.assertIn(f"config {service} start= delayed-auto", wix)
+            self.assertIn(f"failureflag {service} 1", wix)
+        self.assertIn('Id="CA_SetWatchdogFailureFlag"', wix)
+        self.assertIn('After="CA_SetAgentFailureFlag"', wix)
+        self.assertIn("def SvcShutdown(self):", watchdog)
 
     def test_every_installer_generator_enables_hourly_assessment(self) -> None:
         windows_dir = Path(__file__).resolve().parents[1]

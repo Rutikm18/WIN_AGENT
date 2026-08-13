@@ -17,7 +17,7 @@
     Output: pkg\dist\attacklens-agent-<Version>-x64.msi
 
 .PARAMETER Version
-    Semantic version string embedded in MSI metadata. Default: 2.0.13
+    Semantic version string embedded in MSI metadata. Default: 2.0.25
 
 .PARAMETER SignIdentity
     Deprecated. Direct signing in this low-level builder is rejected because
@@ -29,7 +29,7 @@
 
 .EXAMPLE
     # Build (manager properties are supplied at install time)
-    .\build_attacklens_msi.ps1 -Version "2.0.1"
+    .\build_attacklens_msi.ps1 -Version "2.0.25"
 
 .EXAMPLE
     # Production build
@@ -41,7 +41,7 @@
     .\build_attacklens_msi.ps1 -SkipBuild
 #>
 param(
-    [string] $Version      = "2.0.13",
+    [string] $Version      = "2.0.25",
     [string] $SignIdentity = "",
     [switch] $SkipBuild    = $false
 )
@@ -330,7 +330,7 @@ Write-Host ""
 Write-Host "  Minimum install (self-signed cert):" -ForegroundColor Cyan
 Write-Host "    msiexec /i `"$outMsi`" /qn ``"
 Write-Host "        ACCEPT_EULA=`"1`" ``"
-Write-Host "        MANAGER_URL=`"http://13.233.122.80:8080`" ``"
+Write-Host "        MANAGER_URL=`"http://72.61.228.62:8080`" ``"
 Write-Host "        ALLOW_INSECURE_TRANSPORT=`"true`" ``"
 Write-Host "        /l*v install.log"
 Write-Host ""

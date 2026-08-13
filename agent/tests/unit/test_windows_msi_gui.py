@@ -49,9 +49,39 @@ def test_gui_requires_one_unambiguous_manager_address():
     assert "Enter one manager address" in text
     assert 'Text="Manager address:"' in text
     assert 'Property="MANAGER_IP"' not in text
-    assert 'DisableCondition="NOT MANAGER_URL"' in text
+    # Keep Next enabled so MSI commits the edit-control value on the first
+    # click. The validation custom action is the single gate for navigation;
+    # a disabled button can remain stale until the user leaves and re-enters
+    # the dialog.
+    assert 'DisableCondition="NOT MANAGER_URL"' not in text
     assert 'Value="AttackLensEnrollmentDlg"' in text
-    assert 'Condition="MANAGER_URL"' in text
+    assert 'Condition="MANAGER_ADDRESS_VALID = &quot;1&quot;"' in text
+
+
+def test_gui_captures_properties_before_leaving_last_custom_dialog():
+    gui = GUI.read_text(encoding="utf-8")
+    wix = WIX.read_text(encoding="utf-8")
+    capture = '<Publish Event="DoAction" Value="CA_StageWriteConfigUI"'
+    advance = '<Publish Event="NewDialog" Value="VerifyReadyDlg"'
+    assert capture in gui
+    assert advance in gui
+    assert gui.index(capture) < gui.index(advance)
+    assert 'Order="1" Condition="1"' in gui
+    assert 'Order="2" Condition="1"' in gui
+    assert '<InstallUISequence>' not in wix
+
+
+def test_manager_gui_validates_ipv4_before_advancing():
+    gui = GUI.read_text(encoding="utf-8")
+    wix = WIX.read_text(encoding="utf-8")
+    bridge = (WIX.parent / "prepare_config_data.js").read_text(encoding="utf-8")
+    assert 'CA_ValidateManagerAddressUI' in gui
+    assert 'MANAGER_ADDRESS_VALID = &quot;1&quot;' in gui
+    assert 'JScriptCall="ValidateManagerAddressUI"' in wix
+    assert 'function isValidBareIpv4(value)' in bridge
+    assert 'number > 255' in bridge
+    assert 'DNS names and' in bridge
+    assert 'absolute HTTP(S) URLs remain valid' in bridge
 
 
 def test_msi_build_includes_gui_fragment_and_extension():

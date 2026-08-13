@@ -95,7 +95,7 @@ if ($null -ne (Get-MsiProperty -Name "MANAGER_IP")) {
 $secureProperties = ";$(Get-MsiProperty -Name 'SecureCustomProperties');"
 foreach ($name in @(
     "ACCEPT_EULA", "ATTACKLENS_CONFIG_DATA", "ENROLL_TOKEN", "MANAGER_IP", "MANAGER_PORT",
-    "MANAGER_URL", "TLS_VERIFY"
+    "MANAGER_URL", "TLS_VERIFY", "GUI_MANAGER_REQUIRED"
 )) {
     if ($secureProperties -notlike "*;$name;*") {
         throw "SecureCustomProperties is missing $name."
@@ -199,16 +199,43 @@ if (-not [string]::IsNullOrEmpty($stagedDefault)) {
 $uiSequenceRows = @(Invoke-MsiQuery -Sql (
     "SELECT ``Action``,``Condition``,``Sequence`` FROM ``InstallUISequence``"
 ) -ColumnCount 3)
-$uiStage = @($uiSequenceRows | Where-Object { $_.C1 -eq 'CA_StageWriteConfigUI' })
-if ($uiStage.Count -ne 1) {
-    throw 'CA_StageWriteConfigUI must run in the full UI sequence.'
+$scheduledUiStage = @($uiSequenceRows | Where-Object {
+    $_.C1 -eq 'CA_StageWriteConfigUI'
+})
+if ($scheduledUiStage.Count -ne 0) {
+    throw ('CA_StageWriteConfigUI must not be a late InstallUISequence action; ' +
+        'it can lose edit-control properties after the dialog transition.')
 }
-$progressDialog = @($uiSequenceRows | Where-Object { $_.C1 -eq 'ProgressDlg' })
-$executeAction = @($uiSequenceRows | Where-Object { $_.C1 -eq 'ExecuteAction' })
-if ($progressDialog.Count -ne 1 -or $executeAction.Count -ne 1 -or
-        [int]$uiStage[0].C3 -le [int]$progressDialog[0].C3 -or
-        [int]$uiStage[0].C3 -ge [int]$executeAction[0].C3) {
-    throw 'GUI configuration must be captured after ProgressDlg and before ExecuteAction.'
+$controlEventRows = @(Invoke-MsiQuery -Sql (
+    "SELECT ``Dialog_``,``Control_``,``Event``,``Argument``,``Condition``,``Ordering`` " +
+    "FROM ``ControlEvent`` WHERE ``Dialog_``='AttackLensSecurityDlg' " +
+    "AND ``Control_``='Next'"
+) -ColumnCount 6)
+$managerControlEventRows = @(Invoke-MsiQuery -Sql (
+    "SELECT ``Dialog_``,``Control_``,``Event``,``Argument``,``Condition``,``Ordering`` " +
+    "FROM ``ControlEvent`` WHERE ``Dialog_``='AttackLensManagerDlg' " +
+    "AND ``Control_``='Next'"
+) -ColumnCount 6)
+$managerValidation = @($managerControlEventRows | Where-Object {
+    $_.C3 -eq 'DoAction' -and $_.C4 -eq 'CA_ValidateManagerAddressUI'
+})
+$managerAdvance = @($managerControlEventRows | Where-Object {
+    $_.C3 -eq 'NewDialog' -and $_.C4 -eq 'AttackLensEnrollmentDlg'
+})
+if ($managerValidation.Count -ne 1 -or $managerAdvance.Count -ne 1 -or
+        [int]$managerValidation[0].C6 -ge [int]$managerAdvance[0].C6) {
+    throw 'Manager dialog must validate the address before advancing.'
+}
+$dialogCapture = @($controlEventRows | Where-Object {
+    $_.C3 -eq 'DoAction' -and $_.C4 -eq 'CA_StageWriteConfigUI'
+})
+$dialogAdvance = @($controlEventRows | Where-Object {
+    $_.C3 -eq 'NewDialog' -and $_.C4 -eq 'VerifyReadyDlg'
+})
+if ($dialogCapture.Count -ne 1 -or $dialogAdvance.Count -ne 1 -or
+        [int]$dialogCapture[0].C6 -ge [int]$dialogAdvance[0].C6) {
+    throw ('The last custom dialog must capture GUI configuration directly ' +
+        'before advancing to VerifyReadyDlg.')
 }
 if ($prepareConfig[0].C2 -ne 'PrepareConfigDataScript' -or
         $prepareConfig[0].C3 -ne 'PrepareConfigData') {
@@ -226,8 +253,9 @@ foreach ($actionName in @('CA_WriteConfig', 'CA_PurgeState')) {
 }
 $writeConfig = @($customActionRows | Where-Object { $_.C1 -eq 'CA_WriteConfig' })[0]
 if (-not ([string]$writeConfig.C3).Contains(
-        '-EncodedCustomActionData "[CustomActionData]"')) {
-    throw 'CA_WriteConfig does not explicitly consume deferred CustomActionData.'
+        '-EncodedCustomActionData "[CA_WriteConfig]"')) {
+    throw ('CA_WriteConfig must format its hidden action property into the ' +
+        'external EXE command while the deferred action is scheduled.')
 }
 if ((([int]$writeConfig.C4) -band 0x2000) -eq 0) {
     throw 'CA_WriteConfig must hide its target because it can contain an enrollment token.'
@@ -255,6 +283,14 @@ if ($agentFailureFlag.Count -ne 1 -or
         -not ([string] $agentFailureFlag[0].C3).Contains(
             'failureflag AttackLensAgent 1')) {
     throw 'Compiled MSI must apply agent recovery actions to non-crash failures.'
+}
+$watchdogFailureFlag = @($customActionRows | Where-Object {
+    $_.C1 -eq 'CA_SetWatchdogFailureFlag'
+})
+if ($watchdogFailureFlag.Count -ne 1 -or
+        -not ([string] $watchdogFailureFlag[0].C3).Contains(
+            'failureflag AttackLensWatchdog 1')) {
+    throw 'Compiled MSI must apply watchdog recovery actions to non-crash failures.'
 }
 foreach ($serviceName in @('Agent', 'Watchdog')) {
     $actionName = "CA_Set${serviceName}DelayedAutoStart"
@@ -290,17 +326,23 @@ $recoverySequence = @($executeSequenceRows | Where-Object {
 $failureFlagSequence = @($executeSequenceRows | Where-Object {
     $_.C1 -eq 'CA_SetAgentFailureFlag'
 })
+$watchdogFailureFlagSequence = @($executeSequenceRows | Where-Object {
+    $_.C1 -eq 'CA_SetWatchdogFailureFlag'
+})
 $startServices = @($executeSequenceRows | Where-Object {
     $_.C1 -eq 'StartServices'
 })
 if ($configureServices.Count -ne 1 -or $agentDelayedSequence.Count -ne 1 -or
         $watchdogDelayedSequence.Count -ne 1 -or $recoverySequence.Count -ne 1 -or
-        $failureFlagSequence.Count -ne 1 -or $startServices.Count -ne 1 -or
+        $failureFlagSequence.Count -ne 1 -or
+        $watchdogFailureFlagSequence.Count -ne 1 -or
+        $startServices.Count -ne 1 -or
         [int] $agentDelayedSequence[0].C3 -le [int] $configureServices[0].C3 -or
         [int] $watchdogDelayedSequence[0].C3 -le [int] $agentDelayedSequence[0].C3 -or
         [int] $recoverySequence[0].C3 -le [int] $watchdogDelayedSequence[0].C3 -or
         [int] $failureFlagSequence[0].C3 -le [int] $recoverySequence[0].C3 -or
-        [int] $failureFlagSequence[0].C3 -ge [int] $startServices[0].C3) {
+        [int] $watchdogFailureFlagSequence[0].C3 -le [int] $failureFlagSequence[0].C3 -or
+        [int] $watchdogFailureFlagSequence[0].C3 -ge [int] $startServices[0].C3) {
     throw ('Delayed-auto-start and recovery policies must run after ' +
         'MsiConfigureServices and before StartServices in dependency order.')
 }

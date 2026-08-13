@@ -15,9 +15,11 @@ from typing import Any, Callable
 
 
 SERVICE_NAME = "AttackLensAgent"
+WATCHDOG_SERVICE_NAME = "AttackLensWatchdog"
 REPAIR_INTERVAL_SEC = 300
 RESET_PERIOD_SEC = 86_400
 RESTART_ACTIONS = ((1, 5_000), (1, 10_000), (1, 30_000))
+WATCHDOG_RESTART_ACTIONS = ((1, 30_000), (1, 30_000), (1, 30_000))
 
 
 def _normalise_actions(value: Any) -> tuple[tuple[int, int], ...]:
@@ -36,6 +38,8 @@ def enforce_service_policy(
     service_name: str = SERVICE_NAME,
     repair: bool = True,
     win32service_module: Any | None = None,
+    restart_actions: tuple[tuple[int, int], ...] | None = None,
+    failure_actions_on_non_crash: bool = True,
 ) -> dict[str, Any]:
     """Audit and optionally restore the service's persistence contract.
 
@@ -55,6 +59,15 @@ def enforce_service_policy(
             import win32service as win32service_module
 
         ws = win32service_module
+        desired_actions = _normalise_actions(
+            restart_actions
+            if restart_actions is not None
+            else (
+                WATCHDOG_RESTART_ACTIONS
+                if service_name.casefold() == WATCHDOG_SERVICE_NAME.casefold()
+                else RESTART_ACTIONS
+            )
+        )
         query_access = int(getattr(ws, "SERVICE_QUERY_CONFIG", 0x0001))
         change_access = int(getattr(ws, "SERVICE_CHANGE_CONFIG", 0x0002))
         manager = ws.OpenSCManager(
@@ -91,10 +104,12 @@ def enforce_service_policy(
                 "start_type": start_type != desired_start,
                 "delayed_auto_start": not delayed,
                 "failure_actions": (
-                    observed_actions != RESTART_ACTIONS
+                    observed_actions != desired_actions
                     or observed_reset != RESET_PERIOD_SEC
                 ),
-                "failure_actions_on_non_crash": not failure_flag,
+                "failure_actions_on_non_crash": (
+                    failure_flag != bool(failure_actions_on_non_crash)
+                ),
             }
             repaired: list[str] = []
 
@@ -129,7 +144,7 @@ def enforce_service_policy(
                         "ResetPeriod": RESET_PERIOD_SEC,
                         "RebootMsg": None,
                         "Command": None,
-                        "Actions": RESTART_ACTIONS,
+                        "Actions": desired_actions,
                     },
                 )
                 repaired.append("failure_actions")
@@ -137,7 +152,7 @@ def enforce_service_policy(
                 ws.ChangeServiceConfig2(
                     service,
                     int(getattr(ws, "SERVICE_CONFIG_FAILURE_ACTIONS_FLAG", 4)),
-                    True,
+                    bool(failure_actions_on_non_crash),
                 )
                 repaired.append("failure_actions_on_non_crash")
 

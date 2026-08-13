@@ -1,12 +1,12 @@
 # AttackLens Windows Advanced Support
 
-> Current verified runtime/package status: [../CURRENT_IMPLEMENTATION.md](../CURRENT_IMPLEMENTATION.md). Build 2.0.19 supersedes the older incident artifacts documented below.
+> Current verified runtime/package status: [../CURRENT_IMPLEMENTATION.md](../CURRENT_IMPLEMENTATION.md). Build 2.0.24 supersedes the older incident artifacts documented below.
 
 This folder is the single entry point for startup diagnosis, conservative repair, support-bundle collection, Docker scenario validation, root-cause evidence, and the failure matrix for `AttackLensAgent` and `AttackLensWatchdog`.
 
 ## Fastest commands
 
-Repair a rolled-back installation, install 2.0.19 with verbose logging,
+Repair a rolled-back installation, install 2.0.24 with verbose logging,
 and verify both services from an Administrator PowerShell window:
 
 ```powershell

@@ -33,7 +33,7 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--manager",
-        default="http://13.233.122.80:8080",
+        default="http://72.61.228.62:8080",
     )
     parser.add_argument("--timeout", type=int, default=45)
     parser.add_argument(

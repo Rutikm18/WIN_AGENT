@@ -1,6 +1,6 @@
 # Service Startup Root-Cause Analysis
 
-> Historical root-cause record. The fixes are included in the verified 2.0.19 implementation summarized in [../CURRENT_IMPLEMENTATION.md](../CURRENT_IMPLEMENTATION.md).
+> Historical root-cause record. The fixes are included in the current 2.0.24 implementation summarized in [../CURRENT_IMPLEMENTATION.md](../CURRENT_IMPLEMENTATION.md). Endpoint observations below are dated evidence, not the present machine state.
 
 ## Conclusion
 
@@ -147,3 +147,43 @@ A second packaging gap also existed: the verifier proved that required filenames
 were present but not that the CAB contained the current source. The release gate
 now decompiles the completed MSI and SHA-256 compares critical scripts and the
 UI bridge byte-for-byte. A negative test proves it rejects the stale 2.0.12 MSI.
+
+## 2026-08-14: 2.0.21 GUI install wrote an empty manager
+
+The defect was reproduced on the endpoint rather than inferred from source.
+Windows Installer recorded a successful 2.0.21 GUI install, while the protected
+installer diagnostic recorded `manager_source=none` and
+`manager_configured=False`. The resulting `agent.toml` contained `url = ""`,
+both services stayed running in intentional offline-spooling mode, and the
+manager stopped seeing the endpoint. The supplied address was therefore lost
+inside the MSI UI handoff, not rejected by the runtime or the remote manager.
+
+The 2.0.21 MSI captured dialog properties in a late `InstallUISequence` action
+between `ProgressDlg` and `ExecuteAction`. That ordering looked correct in the
+compiled sequence table but did not guarantee that the custom edit-control
+properties were still populated after leaving the dialog stack.
+
+Version 2.0.22 bound capture directly to `AttackLensSecurityDlg.Next` as the
+first control event, before the second event opens `VerifyReadyDlg`. The hidden,
+secure Base64 payload is therefore created while the custom dialogs still own
+their values. Its first endpoint verification provided a second decisive data
+point: the MSI log showed `MANAGER_URL` in both the UI and elevated server
+sessions, but the external generator still reported `manager_source=none`.
+Version 2.0.23 removed the possible stale-snapshot path and proved that the
+failure was later: even a freshly rebuilt server payload did not reach
+PowerShell.
+
+The final cause was the type-34 deferred EXE command line. It referenced
+`[CustomActionData]`, but Microsoft exposes that property to a deferred custom
+action through its installer session handle. The external PowerShell process
+has no session handle, so the formatted argument was empty. Version 2.0.24
+formats the hidden property named for the deferred action directly as
+`[CA_WriteConfig]` while the action is scheduled. The value remains Base64,
+hidden from MSI logs, and covered by the compiled-MSI verifier.
+
+A separate `GUI_MANAGER_REQUIRED` marker crosses the elevation boundary; if a
+full-UI install ever reaches the generator without a manager, the MSI rolls back
+instead of silently creating an offline-only config. Unattended installs without
+a manager remain supported because they do not set the GUI-required marker. The
+compiled-MSI verifier checks the `ControlEvent` table and rejects any regression
+to late sequence capture.

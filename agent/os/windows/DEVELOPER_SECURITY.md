@@ -13,7 +13,7 @@ compatibility:
 | Capability | Record array | Windows source |
 |---|---|---|
 | `editor_extensions` | `items` | VS Code, Cursor, Windsurf extensions |
-| `mcp_servers` | `servers` | Claude, Cursor, Windsurf, Continue, VS Code and Codex configuration |
+| `mcp_servers` | `servers` | Claude, Cursor, Windsurf, Continue, Cline/Roo, VS Code, Codex and bounded workspace configuration |
 | `browser_extensions` | `items` | Chrome, Edge, Brave and Firefox manifests |
 | `native_messaging` | `items` | Native-messaging registry and manifest metadata |
 | `agent_cli_tools` | `items` | Trusted local PATH directories, without executing tools |
@@ -21,10 +21,10 @@ compatibility:
 | `listening_ports` | `items` | `psutil` listeners |
 | `processes` | `items` | Toolhelp32 process name/PID/PPID snapshot |
 | `launchd` | `items` | Run/RunOnce, Startup folders and Winlogon; both WoW64 views |
-| `cron` | `users` | Task Scheduler XML metadata |
+| `cron` | `users` | Task Scheduler native metadata with bounded XML fallback |
 | `shell_startup` | `files` | PowerShell profiles and `cmd.exe` AutoRun metadata |
-| `node_packages` | `users` | Per-user/system global package directories |
-| `python_packages` | `users` | Per-user interpreter and `.dist-info` metadata |
+| `node_packages` | `users` | npm, Yarn, pnpm and Bun global package directories |
+| `python_packages` | `users` | Per-user and machine-wide interpreter/`.dist-info` metadata |
 | `homebrew` | `formulae` | Chocolatey, Scoop and WinGet metadata (`casks` is empty) |
 | `git` | `users` | Per-user/system global Git configuration metadata |
 | `credential_locations` | `users` | Paths and filesystem metadata only |

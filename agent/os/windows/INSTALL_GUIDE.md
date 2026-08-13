@@ -1,8 +1,14 @@
 # AttackLens Agent — Windows Installation & Configuration Guide
 
-> Superseding package and verification status: [CURRENT_IMPLEMENTATION.md](CURRENT_IMPLEMENTATION.md). Use 2.0.19 for new installs; older package references remain only for incident reconstruction. Support tooling is in [`advanced_support/`](advanced_support/README.md).
+> Superseding package and verification status: [CURRENT_IMPLEMENTATION.md](CURRENT_IMPLEMENTATION.md). Use 2.0.25 for new installs. Commands naming older packages are retained only for incident reconstruction. Support tooling is in [`advanced_support/`](advanced_support/README.md).
 
 ## Overview
+
+For client delivery, provide only `pkg\dist\attacklens-agent-2.0.26-x64.msi`.
+The complete elevated terminal procedure is in
+[CLIENT_INSTALLATION_TERMINAL.md](CLIENT_INSTALLATION_TERMINAL.md).
+See [WINDOWS_AGENT_USE_CASES.md](WINDOWS_AGENT_USE_CASES.md) for the supported
+GUI, scripted, recovery, upgrade, and uninstall use cases.
 
 The AttackLens Windows Agent is a self-contained telemetry agent that:
 - Collects system metrics, network activity, security posture, software inventory

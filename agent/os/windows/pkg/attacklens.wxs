@@ -7,23 +7,21 @@
   ══════════════════════════════════════════════════════════════════
 
   Plain HTTP development manager:
-    msiexec /i attacklens-agent-2.0.10-x64.msi /qn ACCEPT_EULA=1 ^
-        MANAGER_URL="http://13.233.122.80:8080" ^
+    msiexec /i attacklens-agent-2.0.25-x64.msi /qn ACCEPT_EULA=1 ^
+        MANAGER_URL="http://72.61.228.62:8080" ^
         ALLOW_INSECURE_TRANSPORT="true" ^
         /l*v install.log
 
-  Production (valid CA cert):
-    msiexec /i attacklens-agent-2.0.10-x64.msi /qn ACCEPT_EULA=1 ^
-        MANAGER_IP="manager.corp.example" ^
-        MANAGER_PORT="8080" ^
-        TLS_VERIFY="false" ^
-        ALLOW_INSECURE_TRANSPORT="true" ^
+  Production (valid CA certificate):
+    msiexec /i attacklens-agent-2.0.25-x64.msi /qn ACCEPT_EULA=1 ^
+        MANAGER_URL="https://manager.corp.example:443" ^
+        TLS_VERIFY="true" ^
         ENROLL_TOKEN="sk-enroll-abc123..." ^
         AGENT_NAME="WORKSTATION-01" ^
         /l*v install.log
 
   Silent uninstall:
-    msiexec /x attacklens-agent-2.0.10-x64.msi /qn
+    msiexec /x attacklens-agent-2.0.25-x64.msi /qn
 
   ══════════════════════════════════════════════════════════════════
   WHAT HAPPENS ON INSTALL
@@ -131,6 +129,10 @@
          Uppercase+Secure crosses the client/elevated-server boundary; Hidden
          prevents enrollment data from appearing in verbose MSI logs. -->
     <Property Id="ATTACKLENS_CONFIG_DATA" Secure="yes" Hidden="yes" />
+    <!-- Set by the full-UI dialog capture. If the elevated generator receives
+         this marker without a manager, installation fails instead of silently
+         creating an offline-only agent.toml. -->
+    <Property Id="GUI_MANAGER_REQUIRED" Secure="yes" />
     <Property Id="ACCEPT_EULA" Secure="yes" />
     <!-- Human label shown in the dashboard. Defaults to COMPUTERNAME at install time. -->
     <Property Id="AGENT_NAME"    Secure="yes" />
@@ -363,8 +365,8 @@
          installed and registry is written, before services start.
 
          Runtime properties are Base64 JSON prepared by an immediate action,
-         exposed as CustomActionData, hidden from MSI logs, and passed
-         explicitly to the deferred SYSTEM PowerShell process.
+         stored in the hidden property named for the deferred action, and
+         formatted into the SYSTEM PowerShell command while it is scheduled.
          ══════════════════════════════════════════════════════════════ -->
 
     <!-- Prepare GUI/silent properties before the original MSI session becomes
@@ -383,12 +385,20 @@
       JScriptCall="StageConfigDataFromUI"
       Execute="immediate"
       Return="check" />
+    <CustomAction Id="CA_ValidateManagerAddressUI"
+      BinaryRef="PrepareConfigDataScript"
+      JScriptCall="ValidateManagerAddressUI"
+      Bitness="always64"
+      Execute="immediate"
+      Return="check" />
 
     <!-- Deferred CA runs PowerShell with the installed gen_config.ps1 as
-         NT AUTHORITY\SYSTEM and explicitly consumes hidden CustomActionData. -->
+         NT AUTHORITY\SYSTEM. A type-34 EXE has no MSI session handle, so its
+         scheduled command must format [CA_WriteConfig] directly; using
+         [CustomActionData] here expands to empty. -->
     <CustomAction Id="CA_WriteConfig"
       Directory="TOOLSDIR"
-      ExeCommand="&quot;[System64Folder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;gen_config.ps1&quot; -EncodedCustomActionData &quot;[CustomActionData]&quot;"
+      ExeCommand="&quot;[System64Folder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;gen_config.ps1&quot; -EncodedCustomActionData &quot;[CA_WriteConfig]&quot;"
       Execute="deferred"
       Impersonate="no"
       HideTarget="yes"
@@ -448,13 +458,12 @@
       Execute="deferred"
       Impersonate="no"
       Return="check" />
-
-    <InstallUISequence>
-      <!-- Capture final dialog values before ExecuteAction switches from the
-           interactive MSI client to the elevated Windows Installer server. -->
-      <Custom Action="CA_StageWriteConfigUI" After="ProgressDlg"
-              Condition="NOT Installed OR REINSTALL" />
-    </InstallUISequence>
+    <CustomAction Id="CA_SetWatchdogFailureFlag"
+      Directory="System64Folder"
+      ExeCommand="&quot;[System64Folder]sc.exe&quot; failureflag AttackLensWatchdog 1"
+      Execute="deferred"
+      Impersonate="no"
+      Return="check" />
 
     <InstallExecuteSequence>
       <!-- After files land + registry is written; before services are registered/started -->
@@ -473,6 +482,8 @@
       <Custom Action="CA_SetAgentRecoveryActions" After="CA_SetWatchdogDelayedAutoStart"
               Condition="NOT Installed OR REINSTALL" />
       <Custom Action="CA_SetAgentFailureFlag" After="CA_SetAgentRecoveryActions"
+              Condition="NOT Installed OR REINSTALL" />
+      <Custom Action="CA_SetWatchdogFailureFlag" After="CA_SetAgentFailureFlag"
               Condition="NOT Installed OR REINSTALL" />
       <Custom Action="CA_PurgeState" Before="RemoveFiles"
               Condition="REMOVE~=&quot;ALL&quot; AND PURGE_ON_UNINSTALL=&quot;1&quot;" />

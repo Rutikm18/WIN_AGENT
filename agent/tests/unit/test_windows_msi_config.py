@@ -22,6 +22,7 @@ def test_primary_msi_exposes_final_property_model():
         "MANAGER_URL", "MANAGER_IP", "MANAGER_PORT", "TLS_VERIFY",
         "CA_BUNDLE", "SPKI_PIN", "ENROLL_TOKEN", "AGENT_NAME",
         "COLLECTION_PROFILE", "PRESERVE_STATE", "PURGE_ON_UNINSTALL",
+        "GUI_MANAGER_REQUIRED",
     ):
         assert f'Property Id="{name}"' in text
         assert f"'{name}'" in bridge
@@ -32,9 +33,10 @@ def test_primary_msi_exposes_final_property_model():
     assert 'JScriptCall="PrepareConfigData"' in text
     assert 'JScriptCall="StageConfigDataFromUI"' in text
     assert '<Property Id="ATTACKLENS_CONFIG_DATA" Secure="yes" Hidden="yes" />' in text
-    assert '<InstallUISequence>' in text
-    assert 'After="ProgressDlg"' in text
-    assert '-EncodedCustomActionData &quot;[CustomActionData]&quot;' in text
+    assert '<InstallUISequence>' not in text
+    assert 'After="ProgressDlg"' not in text
+    assert '-EncodedCustomActionData &quot;[CA_WriteConfig]&quot;' in text
+    assert '-EncodedCustomActionData &quot;[CustomActionData]&quot;' not in text
     assert 'HideTarget="yes"' in text
 
 
@@ -51,6 +53,7 @@ def test_deferred_generator_properties_cross_the_elevation_boundary():
         "MANAGER_URL", "MANAGER_IP", "MANAGER_PORT", "TLS_VERIFY",
         "CA_BUNDLE", "SPKI_PIN", "ENROLL_TOKEN", "AGENT_NAME",
         "COLLECTION_PROFILE", "PRESERVE_STATE", "PURGE_ON_UNINSTALL",
+        "GUI_MANAGER_REQUIRED",
     ):
         assert f'Property Id="{name}"' in text
         property_line = next(line for line in text.splitlines() if f'Property Id="{name}"' in line)
@@ -134,6 +137,22 @@ def test_generator_allows_offline_install_without_manager():
     assert "$managerUrl = ''" in text
     assert "if ($managerUrl -and $managerUrl -notmatch" in text
     assert "Captured installer configuration: manager_source=" in text
+
+
+def test_gui_manager_handoff_fails_closed_but_silent_offline_remains_supported():
+    wix = WIX.read_text(encoding="utf-8")
+    bridge = BRIDGE.read_text(encoding="utf-8")
+    generator = GENERATOR.read_text(encoding="utf-8")
+    assert '<Property Id="GUI_MANAGER_REQUIRED" Secure="yes" />' in wix
+    assert "Session.Property('GUI_MANAGER_REQUIRED') = '1'" in bridge
+    assert "Session.Property('UILevel') === '5'" in bridge
+    assert "Session.Property('CA_WriteConfig') = buildConfigData();" in bridge
+    assert "var encoded = Session.Property('ATTACKLENS_CONFIG_DATA');" not in bridge
+    assert "['G', 'GUI_MANAGER_REQUIRED']" in bridge
+    assert "G = 'GUI_MANAGER_REQUIRED'" in generator
+    assert "$guiManagerRequired -and -not $managerOverrideRequested" in generator
+    assert "prevent an empty [manager] url" in generator
+    assert "gui_manager_required={4}" in generator
 
 
 def test_purge_is_explicitly_opt_in_and_path_bound():

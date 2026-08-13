@@ -1,11 +1,24 @@
 # AttackLens Agent — Windows Installation Guide
 
-> Current package: `pkg\dist\attacklens-agent-2.0.19-x64.msi`. See [CURRENT_IMPLEMENTATION.md](CURRENT_IMPLEMENTATION.md) for its verified hash and gates. Older version commands below are retained as upgrade/incident history; support tooling is in [`advanced_support/`](advanced_support/README.md).
+> Current package: `pkg\dist\attacklens-agent-2.0.25-x64.msi`. See [CURRENT_IMPLEMENTATION.md](CURRENT_IMPLEMENTATION.md) for its verified hash and gates. Commands naming 2.0.10–2.0.13 below are historical upgrade/incident examples; support tooling is in [`advanced_support/`](advanced_support/README.md).
+
+The MSI is self-contained for a normal GUI install; do not copy the adjacent
+PyInstaller folders, Python files, or WiX files to the target machine. The only
+runtime prerequisites are supported Windows, Administrator approval, and network
+reachability to the configured manager. The MSI creates the Program Files and
+ProgramData trees and registers both services automatically.
+
+For client handoff, use the step-by-step terminal procedure in
+[CLIENT_INSTALLATION_TERMINAL.md](CLIENT_INSTALLATION_TERMINAL.md). The client
+receives only the MSI.
+
+See [WINDOWS_AGENT_USE_CASES.md](WINDOWS_AGENT_USE_CASES.md) for GUI, scripted,
+offline, reboot, upgrade, repair, and uninstall scenarios.
 
 Current silent install with bare-host HTTP/8080 normalization:
 
 ```powershell
-msiexec /i "pkg\dist\attacklens-agent-2.0.19-x64.msi" /qn ACCEPT_EULA=1 MANAGER_URL="72.61.228.62" /l*v "$env:TEMP\attacklens-2.0.19-install.log"
+msiexec /i "pkg\dist\attacklens-agent-2.0.26-x64.msi" /qn ACCEPT_EULA=1 MANAGER_URL="72.61.228.62" /l*v "$env:TEMP\attacklens-2.0.26-install.log"
 ```
 
 ## What the MSI does (fully automatic)
@@ -105,6 +118,13 @@ agent name, collection profile, and repair/uninstall state choices. The same
 property validation and fail-closed configuration generator is used for GUI
 and silent installs. The development-only certificate-verification checkbox
 should remain disabled for production managers.
+
+On the Manager connection page, enter the address and click **Next** once;
+the button remains available while the edit control commits the value. The
+validation action then accepts a bare IPv4 address (for example
+`72.61.228.62`), a DNS name, or an absolute HTTP(S) URL and blocks navigation
+only when the value is invalid. There is no need to go Back and return to the
+page.
 
 The purge choice is recorded for the uninstall workflow; the full safe purge
 implementation is still gated behind the Windows lifecycle milestone. Cancel

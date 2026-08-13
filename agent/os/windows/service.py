@@ -1,32 +1,31 @@
 """
-agent/os/windows/service.py — Windows Service wrapper for mac_intel agent.
+agent/os/windows/service.py — Windows Service wrapper for AttackLens Agent.
 
 The agent binary is built as a console application by PyInstaller. This module
-wraps the agent core inside a Windows Service so it starts at boot, runs as
-NETWORK SERVICE (or a dedicated service account), and integrates with the
-Windows Service Control Manager (SCM).
+wraps the Windows agent inside a LocalSystem service so it starts at boot and
+integrates with the Windows Service Control Manager (SCM).
 
 Architecture
 ────────────
   SCM
-   └─ MacIntelAgent service  (this module)
-       └─ agent.agent.core   (runs in a daemon thread)
+   └─ AttackLensAgent service  (this module)
+       └─ agent.os.windows.win_agent.WindowsAgent
 
 Service lifecycle
 ─────────────────
   install   → sc create / win32serviceutil.InstallService
-  start     → SvcDoRun → _run_agent_thread
-  stop      → SvcStop → sets _stop_event → thread exits → service stops
+  start     → SvcDoRun → WindowsAgent.run
+  stop      → SvcStop/preshutdown → durable outbox close → service stops
   remove    → sc delete / win32serviceutil.RemoveService
 
 CLI (when run as a PyInstaller binary)
 ──────────────────────────────────────
-  macintel-agent.exe install   — register service
-  macintel-agent.exe start     — start service
-  macintel-agent.exe stop      — stop service
-  macintel-agent.exe remove    — unregister service
-  macintel-agent.exe debug     — run in foreground (no service; useful for testing)
-  macintel-agent.exe           — (no args) hand control to SCM (used when SCM starts it)
+  attacklens-agent.exe install   — register service
+  attacklens-agent.exe start     — start service
+  attacklens-agent.exe stop      — stop service
+  attacklens-agent.exe remove    — unregister service
+  attacklens-agent.exe debug     — run in foreground (no service; useful for testing)
+  attacklens-agent.exe           — (no args) hand control to SCM (used when SCM starts it)
 
 Dependencies (Windows only)
 ───────────────────────────

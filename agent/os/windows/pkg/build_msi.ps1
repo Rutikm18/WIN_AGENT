@@ -10,13 +10,13 @@
     MSI properties (MANAGER_IP, ENROLL_TOKEN, etc.).
 
     Install (after build):
-      msiexec /i dist\attacklens-agent-2.0.1-x64.msi /qn ACCEPT_EULA=1 ^
-          MANAGER_URL="http://13.233.122.80:8080" ^
+      msiexec /i dist\attacklens-agent-2.0.25-x64.msi /qn ACCEPT_EULA=1 ^
+          MANAGER_URL="http://72.61.228.62:8080" ^
           ALLOW_INSECURE_TRANSPORT="true" ^
           /l*v install.log
 
 .PARAMETER Version
-    MSI version string. Default: 2.0.13
+    MSI version string. Default: 2.0.25
 
 .PARAMETER SkipBuild
     Skip PyInstaller rebuild — reuse existing binaries in dist\.
@@ -27,7 +27,7 @@
     .\build_msi.ps1 -SkipBuild
 #>
 param(
-    [string] $Version   = "2.0.13",
+    [string] $Version   = "2.0.25",
     [switch] $SkipBuild = $false
 )
 
@@ -280,7 +280,7 @@ Banner "DONE"
 Write-Host "  MSI : $outMsi  ($sizeMb MB)" -ForegroundColor Yellow
 Write-Host ""
 Write-Host "Install (minimum):" -ForegroundColor Cyan
-Write-Host "  msiexec /i `"$outMsi`" /qn ACCEPT_EULA=1 MANAGER_URL=`"http://13.233.122.80:8080`" ALLOW_INSECURE_TRANSPORT=`"true`" /l*v install.log"
+Write-Host "  msiexec /i `"$outMsi`" /qn ACCEPT_EULA=1 MANAGER_URL=`"http://72.61.228.62:8080`" ALLOW_INSECURE_TRANSPORT=`"true`" /l*v install.log"
 Write-Host ""
 Write-Host "Uninstall:" -ForegroundColor Cyan
 Write-Host "  msiexec /x `"$outMsi`" /qn"
